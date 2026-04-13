@@ -83,25 +83,52 @@ def generate_sample_events_csv(
         preferred_hour = int(context["preferred_hour"])
         normal_destinations = list(context["normal_destinations"])
         normal_source = str(context["normal_source"])
+        suspicious_count = min(6, events_per_user)
+        suspicious_start = events_per_user - suspicious_count
 
         for event_index in range(events_per_user):
             timestamp = start_time + timedelta(minutes=20 * event_index) + timedelta(
                 hours=max(0, preferred_hour - 8)
             )
-            timestamp = timestamp.replace(hour=min(23, max(0, preferred_hour + random.randint(-2, 2))))
+            suspicious = event_index >= suspicious_start and user_id == str(contexts[-1]["user_id"])
+            if suspicious:
+                # Force late-night, repeated activity for the risky user so the
+                # demo reliably produces multiple critical insider-threat alerts.
+                suspicious_hours = [2, 2, 2, 2, 2, 3]
+                suspicious_minutes = [0, 10, 20, 30, 40, 0]
+                suspicious_index = event_index - suspicious_start
+                timestamp = timestamp.replace(
+                    hour=suspicious_hours[suspicious_index],
+                    minute=suspicious_minutes[suspicious_index],
+                )
+            else:
+                timestamp = timestamp.replace(hour=min(23, max(0, preferred_hour + random.randint(-2, 2))))
 
-            suspicious = event_index >= events_per_user - 4 and user_id == str(contexts[-1]["user_id"])
             row = {
                 "timestamp": timestamp.isoformat(),
                 "user_id": user_id,
-                "source_ip": f"172.16.99.{random.randint(100, 220)}" if suspicious else normal_source,
-                "destination_ip": random.choice([f"10.0.0.{index}" for index in range(10, 25)])
-                if suspicious
-                else random.choice(normal_destinations),
+                "source_ip": (
+                    f"172.16.99.{150 + suspicious_index}"
+                    if suspicious
+                    else normal_source
+                ),
+                "destination_ip": (
+                    f"10.0.0.{20 + suspicious_index}"
+                    if suspicious
+                    else random.choice(normal_destinations)
+                ),
                 "protocol": random.choice(protocols),
                 "action": random.choice(actions),
-                "bytes_sent": random.randint(15000, 30000) if suspicious else random.randint(400, 4000),
-                "bytes_received": random.randint(8000, 20000) if suspicious else random.randint(300, 2500),
+                "bytes_sent": (
+                    22000 + suspicious_index * 2500
+                    if suspicious
+                    else random.randint(400, 4000)
+                ),
+                "bytes_received": (
+                    12000 + suspicious_index * 1800
+                    if suspicious
+                    else random.randint(300, 2500)
+                ),
             }
             rows.append(row)
 
@@ -143,10 +170,15 @@ def append_live_events_csv(
         normal_source = str(context["normal_source"])
 
         timestamp = last_timestamp + timedelta(minutes=5 * (event_index + 1))
-        if event_index % 3 == 0:
+        suspicious = user_id == risky_user_id and random.random() < 0.55
+        if suspicious:
+            # Use repeated off-hours activity to simulate an active insider
+            # exfiltration session and trigger critical-level alerts.
+            suspicious_hour = 2 if event_index % 4 != 3 else 3
+            timestamp = timestamp.replace(hour=suspicious_hour)
+        elif event_index % 3 == 0:
             timestamp = timestamp.replace(hour=min(23, max(0, preferred_hour + random.randint(-2, 2))))
 
-        suspicious = user_id == risky_user_id and random.random() < 0.55
         row = {
             "timestamp": timestamp.isoformat(),
             "user_id": user_id,
