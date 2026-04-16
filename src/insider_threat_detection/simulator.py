@@ -18,6 +18,24 @@ FIELDNAMES = [
 ]
 
 
+def _resolve_last_timestamp(existing_rows: list[dict[str, str]]) -> datetime:
+    now = datetime.now().replace(second=0, microsecond=0)
+    if existing_rows:
+        latest_timestamp = max(datetime.fromisoformat(str(row["timestamp"])) for row in existing_rows)
+        return min(latest_timestamp, now - timedelta(minutes=5))
+    return now - timedelta(minutes=5)
+
+
+def _risky_user_id_for_batch(user_count: int, batch_index: int) -> str:
+    return f"user_{(batch_index % user_count) + 1}"
+
+
+def _batch_index_from_existing_rows(existing_rows: list[dict[str, str]], batch_size: int) -> int:
+    if not existing_rows or batch_size <= 0:
+        return 0
+    return len(existing_rows) // batch_size
+
+
 def _build_user_context(user_count: int) -> list[dict[str, object]]:
     users = [f"user_{index + 1}" for index in range(user_count)]
     destinations = [f"10.0.0.{index}" for index in range(10, 25)]
@@ -75,7 +93,10 @@ def generate_sample_events_csv(
     actions = ["login", "file_access", "email", "database_query"]
     contexts = _build_user_context(user_count)
 
-    start_time = datetime.now().replace(minute=0, second=0, microsecond=0) - timedelta(days=3)
+    now = datetime.now().replace(second=0, microsecond=0)
+    total_events = user_count * events_per_user
+    total_duration_minutes = max(total_events - 1, 0) * 20
+    start_time = now - timedelta(minutes=total_duration_minutes)
     rows: list[dict[str, str | int]] = []
 
     for context in contexts:
@@ -133,7 +154,77 @@ def generate_sample_events_csv(
             rows.append(row)
 
     rows.sort(key=lambda item: item["timestamp"])
+    for row in rows:
+        row_timestamp = datetime.fromisoformat(str(row["timestamp"]))
+        if row_timestamp > now:
+            row["timestamp"] = now.isoformat()
     _write_rows(output_path, rows)
+
+
+def append_sample_events_csv(
+    output_path: Path,
+    user_count: int = 6,
+    events_per_user: int = 80,
+    seed: int | None = None,
+) -> None:
+    if seed is not None:
+        random.seed(seed)
+
+    protocols = ["TCP", "UDP", "HTTPS", "DNS"]
+    actions = ["login", "file_access", "email", "database_query"]
+    existing_rows = _read_existing_rows(output_path)
+    start_time = _resolve_last_timestamp(existing_rows)
+    now = datetime.now().replace(second=0, microsecond=0)
+    batch_index = _batch_index_from_existing_rows(existing_rows, user_count * events_per_user)
+    risky_user_id = _risky_user_id_for_batch(user_count, batch_index)
+    contexts = _build_user_context(user_count)
+    rows: list[dict[str, str | int]] = []
+
+    for context_index, context in enumerate(contexts):
+        user_id = str(context["user_id"])
+        preferred_hour = int(context["preferred_hour"])
+        normal_destinations = list(context["normal_destinations"])
+        normal_source = str(context["normal_source"])
+        suspicious_count = min(6, events_per_user)
+        suspicious_start = events_per_user - suspicious_count
+
+        for event_index in range(events_per_user):
+            timestamp = start_time + timedelta(
+                minutes=20 * (context_index * events_per_user + event_index + 1)
+            )
+            suspicious = event_index >= suspicious_start and user_id == risky_user_id
+            suspicious_index = max(0, event_index - suspicious_start)
+            if suspicious:
+                suspicious_hour = 1 + ((batch_index + suspicious_index) % 4)
+                suspicious_minute = (suspicious_index * 10) % 60
+                timestamp = timestamp.replace(hour=suspicious_hour, minute=suspicious_minute)
+            else:
+                timestamp = timestamp.replace(
+                    hour=min(23, max(0, preferred_hour + random.randint(-2, 2)))
+                )
+            timestamp = min(timestamp, now)
+
+            rows.append(
+                {
+                    "timestamp": timestamp.isoformat(),
+                    "user_id": user_id,
+                    "source_ip": f"172.16.99.{150 + batch_index + suspicious_index}" if suspicious else normal_source,
+                    "destination_ip": f"10.0.0.{20 + ((batch_index + suspicious_index) % 5)}"
+                    if suspicious
+                    else random.choice(normal_destinations),
+                    "protocol": random.choice(protocols),
+                    "action": random.choice(actions),
+                    "bytes_sent": 22000 + suspicious_index * 2500 + batch_index * 400
+                    if suspicious
+                    else random.randint(400, 4000),
+                    "bytes_received": 12000 + suspicious_index * 1800 + batch_index * 250
+                    if suspicious
+                    else random.randint(300, 2500),
+                }
+            )
+
+    rows.sort(key=lambda item: item["timestamp"])
+    _append_rows(output_path, rows)
 
 
 def append_live_events_csv(
@@ -150,17 +241,12 @@ def append_live_events_csv(
     destinations = [f"10.0.0.{index}" for index in range(10, 25)]
     existing_rows = _read_existing_rows(output_path)
     contexts = _build_user_context(user_count)
-
-    if existing_rows:
-        last_timestamp = max(
-            datetime.fromisoformat(str(row["timestamp"]))
-            for row in existing_rows
-        )
-    else:
-        last_timestamp = datetime.now().replace(second=0, microsecond=0) - timedelta(minutes=5)
+    last_timestamp = _resolve_last_timestamp(existing_rows)
+    now = datetime.now().replace(second=0, microsecond=0)
 
     new_rows: list[dict[str, str | int]] = []
-    risky_user_id = str(contexts[-1]["user_id"])
+    batch_index = _batch_index_from_existing_rows(existing_rows, max(events_to_add, 1))
+    risky_user_id = _risky_user_id_for_batch(user_count, batch_index)
 
     for event_index in range(events_to_add):
         context = contexts[event_index % len(contexts)]
@@ -174,10 +260,11 @@ def append_live_events_csv(
         if suspicious:
             # Use repeated off-hours activity to simulate an active insider
             # exfiltration session and trigger critical-level alerts.
-            suspicious_hour = 2 if event_index % 4 != 3 else 3
+            suspicious_hour = 1 + ((batch_index + event_index) % 4)
             timestamp = timestamp.replace(hour=suspicious_hour)
         elif event_index % 3 == 0:
             timestamp = timestamp.replace(hour=min(23, max(0, preferred_hour + random.randint(-2, 2))))
+        timestamp = min(timestamp, now)
 
         row = {
             "timestamp": timestamp.isoformat(),

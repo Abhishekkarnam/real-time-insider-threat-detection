@@ -11,7 +11,11 @@ if str(SRC_PATH) not in sys.path:
     sys.path.insert(0, str(SRC_PATH))
 
 from insider_threat_detection.pipeline import analyze_events
-from insider_threat_detection.simulator import append_live_events_csv, generate_sample_events_csv
+from insider_threat_detection.simulator import (
+    append_live_events_csv,
+    append_sample_events_csv,
+    generate_sample_events_csv,
+)
 
 DATA_PATH = PROJECT_ROOT / "data" / "network_events.csv"
 
@@ -73,8 +77,8 @@ def build_sidebar(events_df: pd.DataFrame) -> dict[str, object]:
         st.cache_data.clear()
         st.rerun()
 
-    if st.sidebar.button("Regenerate sample data"):
-        generate_sample_events_csv(DATA_PATH, user_count=6, events_per_user=80)
+    if st.sidebar.button("Append sample data batch"):
+        append_sample_events_csv(DATA_PATH, user_count=6, events_per_user=80)
         st.cache_data.clear()
         st.rerun()
 
