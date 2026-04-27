@@ -1,45 +1,74 @@
-# Real-Time Insider Threat Detection Using Network Behavior Profiling
+Real-Time Insider Threat Detection Using Network Behavior Profiling
+This project detects suspicious insider activity by collecting live system/network activity, building behavior profiles for users, scoring deviations, and displaying alerts in a Streamlit dashboard.
 
-This repository is a starter implementation for a course project focused on detecting insider threats by modeling user network behavior over time and flagging deviations in real time.
+The original starter version used simulated CSV data. The current version supports real-time collection from the local Windows machine using psutil or packet capture with scapy.
 
-## Project Idea
-
-Insider threats are difficult to detect because the attacker is often a legitimate user. Instead of relying only on signatures or blacklists, this project builds a behavior profile for each user and raises alerts when activity becomes unusual.
+Project Idea
+Insider threats are difficult to detect because the user may already have valid access. Instead of relying only on signatures or blocklists, this project learns normal behavior patterns and raises alerts when current activity deviates from that baseline.
 
 Examples of suspicious behavior include:
 
-- Logging in at unusual hours
-- Connecting to rarely used destinations
-- Sudden spikes in upload volume
-- Abnormal access frequency
-- New device or source IP changes
+Connecting to rarely used destinations
+Sudden spikes in upload/download volume
+Abnormal access frequency
+New source IP or device-like changes
+Network activity at unusual hours
+Current Scope
+The current project includes:
 
-## Starter Scope
+Real-time network collection using psutil
+Optional packet-level capture using scapy
+Continuous append-only CSV event storage
+CSV compatibility with the existing anomaly pipeline
+Per-user behavior profiling
+Lightweight anomaly scoring
+Alert severity classification
+Streamlit dashboard with auto-refresh
+Optional localhost traffic filtering
+Safe handling for empty files, permissions, and partial CSV reads
+How The System Works
+real network activity
+        |
+        v
+real_time_collector.py
+        |
+        v
+data/network_events.csv
+        |
+        v
+pipeline.py + detector.py
+        |
+        v
+Streamlit dashboard alerts and charts
+The collector appends live events to data/network_events.csv. The dashboard continuously reads that CSV, sends events through the anomaly detection pipeline, and displays scored events and alerts.
 
-This starter version includes:
+Event Schema
+The CSV uses this schema:
 
-- A clean Python project structure
-- Synthetic event generation for normal and suspicious traffic
-- Real-time per-user behavior profiling
-- A simple anomaly scoring engine
-- Alert generation for high-risk events
-- A Streamlit dashboard for alerts and graphs
+timestamp,user_id,source_ip,destination_ip,protocol,action,bytes_sent,bytes_received
+This keeps the real-time collector compatible with the existing detection pipeline.
 
-## Suggested Final Project Flow
+Collector Backends
+psutil
+psutil reads active network connections from the operating system.
 
-1. Collect or simulate network events
-2. Build per-user normal behavior profiles
-3. Extract real-time features from each event
-4. Score anomalies using behavioral deviation
-5. Raise alerts with reasons
-6. Evaluate precision, recall, and false positives
+Use this backend for normal Windows demos because it is simpler and usually does not require packet-capture drivers.
 
-## Repository Structure
+scapy
+scapy captures packets directly.
 
-```text
+Use this backend when you want packet-level visibility. On Windows, Scapy usually requires:
+
+Administrator PowerShell or terminal
+Npcap installed
+Active network traffic during capture
+Repository Structure
 .
 |-- README.md
 |-- requirements.txt
+|-- dashboard.py
+|-- real_time_collector.py
+|-- run_demo.py
 |-- docs/
 |   `-- project-plan.md
 |-- scripts/
@@ -51,79 +80,84 @@ This starter version includes:
         |-- detector.py
         |-- models.py
         |-- pipeline.py
+        |-- real_time_collector.py
         `-- simulator.py
-```
+simulator.py and scripts/generate_sample_data.py are kept as optional legacy/sample-data helpers. The main project path now uses real-time collection.
 
-## Quick Start
+Quick Start
+Create and activate a virtual environment:
 
-1. Create a virtual environment
-2. Install requirements
-3. Generate sample data
-4. Run the pipeline
-
-```powershell
 python -m venv .venv
 .venv\Scripts\Activate.ps1
+Install dependencies:
+
 python -m pip install -r requirements.txt
-python scripts/generate_sample_data.py
-python run_demo.py
-```
+Run the dashboard:
 
-## Dashboard
-
-Launch the Streamlit dashboard with:
-
-```powershell
 streamlit run dashboard.py
-```
+In the dashboard sidebar:
 
-The dashboard shows:
+Turn on Run real-time collector
+Choose psutil or scapy as the collector backend
+Keep Ignore localhost traffic enabled unless you want loopback events
+Turn on Auto-refresh dashboard to watch new events appear
+Running The Collector Directly
+Run the default psutil collector:
 
-- Total processed events and alert rate
-- Severity overview with Low, Medium, High, and Critical alert levels
-- Alert timeline
-- Alert counts by user
-- Traffic volume over time
-- Average anomaly score by hour
-- Common alert reasons
-- Recent alerts and the full scored event stream
-- Downloadable CSV export for alerts and scored events
+python real_time_collector.py --backend psutil
+Run the Scapy packet-capture collector:
 
-For a live demo experience:
+python real_time_collector.py --backend scapy
+Include localhost traffic if needed:
 
-- Turn on `Auto-refresh dashboard`
-- Turn on `Live simulation mode`
-- Choose a refresh interval and events-per-refresh batch size
-- Watch new events and alerts appear automatically
+python real_time_collector.py --backend psutil --include-localhost
+The collector appends events every 5 seconds by default.
 
-## Current Detection Strategy
+Dashboard
+The Streamlit dashboard shows:
 
+Total processed events and alert rate
+Severity overview with Low, Medium, High, and Critical alerts
+Alert timeline
+Alert counts by user
+Traffic volume over time
+Average anomaly score by hour
+Common alert reasons
+Recent alerts
+Full scored event stream
+Downloadable CSV exports for alerts and scored events
+Current Detection Strategy
 The baseline detector uses lightweight behavior profiling:
 
-- Typical login hour range per user
-- Known source IPs
-- Known destination IPs
-- Average bytes sent and received
-- Event count growth
+Typical activity hour per user
+Known source IPs
+Known destination IPs
+Average bytes sent
+Average bytes received
+Recent event frequency
+An event receives a higher score when it contains multiple deviations from the user's normal profile. Alerts are generated when the score crosses the configured threshold.
 
-It then scores an event higher when it contains multiple deviations from the user's normal profile.
-
-## Good Next Steps
-
-- Add role-based anomaly thresholds and severity levels
-- Train an unsupervised model such as Isolation Forest
-- Use sliding time windows for richer behavior profiles
-- Add role-based baselines across teams
-- Compare behavior before and after suspicious events
-- Export alerts to CSV or a database
-
-## Course Report Sections
-
-- Problem statement
-- Literature review
-- Dataset and feature design
-- Detection methodology
-- Experimental results
-- Limitations and future work
-
-This starter is designed to help you begin immediately, then improve the system step by step as your course project grows.
+Windows Notes
+Run PowerShell as Administrator for better network visibility.
+Scapy packet capture may require Npcap.
+If no events appear, open a browser or another networked application and refresh the dashboard.
+If permission errors appear, use the psutil backend first, then try Scapy with Administrator privileges.
+Good Next Steps
+Add persistent user profiles instead of rebuilding profiles from CSV each run
+Add role-based anomaly thresholds
+Train an unsupervised model such as Isolation Forest
+Use sliding time windows for behavior profiles
+Store events and alerts in SQLite or PostgreSQL
+Add process name and PID enrichment for psutil events
+Add dashboard controls for alert threshold tuning
+Compare false positives between psutil and scapy backends
+Course Report Sections
+Problem statement
+Literature review
+Dataset and feature design
+Real-time collection methodology
+Behavior profiling methodology
+Detection and alerting strategy
+Experimental results
+Limitations and future work
+This project is now a real-time insider threat detection prototype that can collect live network activity, append it to the existing CSV pipeline, score anomalies, and visualize alerts through Streamlit.
