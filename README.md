@@ -6,7 +6,7 @@ The original version used simulated data. This upgraded version supports **real-
 
 ---
 
-## 🚀 Project Idea
+##  Project Idea
 
 Insider threats are difficult to detect because attackers often have legitimate access.
 
@@ -18,7 +18,7 @@ Instead of relying on signatures or blacklists, this system:
 
 ---
 
-## ⚠️ Examples of Suspicious Behavior
+##  Examples of Suspicious Behavior
 
 - Logging in at unusual hours  
 - Connecting to rarely used destinations  
@@ -28,7 +28,7 @@ Instead of relying on signatures or blacklists, this system:
 
 ---
 
-## 📌 Current Scope
+##  Current Scope
 
 This project includes:
 
@@ -45,7 +45,7 @@ This project includes:
 
 ---
 
-## ⚙️ System Architecture
+##  System Architecture
 
 ```
 Real Network Activity
@@ -65,7 +65,7 @@ Streamlit Dashboard (Alerts + Graphs)
 
 ---
 
-## 📊 Event Schema
+##  Event Schema
 
 ```
 timestamp,user_id,source_ip,destination_ip,protocol,action,bytes_sent,bytes_received
@@ -73,7 +73,7 @@ timestamp,user_id,source_ip,destination_ip,protocol,action,bytes_sent,bytes_rece
 
 ---
 
-## 🔌 Collector Backends
+##  Collector Backends
 
 ### 1. psutil
 - Reads active network connections
@@ -89,7 +89,7 @@ timestamp,user_id,source_ip,destination_ip,protocol,action,bytes_sent,bytes_rece
 
 ---
 
-## 📁 Repository Structure
+##  Repository Structure
 
 ```
 .
@@ -115,7 +115,7 @@ timestamp,user_id,source_ip,destination_ip,protocol,action,bytes_sent,bytes_rece
 
 ---
 
-## ⚡ Quick Start
+##  Quick Start
 
 ### 1. Create Virtual Environment
 ```powershell
@@ -137,7 +137,7 @@ streamlit run dashboard.py
 
 ---
 
-## 🖥️ Dashboard Features
+##  Dashboard Features
 
 * Total processed events & alert rate
 * Severity levels (Low, Medium, High, Critical)
@@ -152,7 +152,7 @@ streamlit run dashboard.py
 
 ---
 
-## 🔴 Live Demo Setup
+##  Live Demo Setup
 
 In the dashboard sidebar:
 
@@ -163,7 +163,7 @@ In the dashboard sidebar:
 
 ---
 
-## ▶️ Run Collector Manually
+##  Run Collector Manually
 
 ### psutil (recommended)
 
@@ -185,7 +185,7 @@ python real_time_collector.py --backend psutil --include-localhost
 
 ---
 
-## 🧠 Detection Strategy
+##  Detection Strategy
 
 The baseline model builds **behavior profiles per user** using:
 
@@ -201,7 +201,7 @@ Alerts are triggered when the score crosses a threshold.
 
 ---
 
-## 🪟 Windows Notes
+##  Windows Notes
 
 * Run PowerShell as Administrator for better results
 * Install **Npcap** for Scapy
@@ -212,7 +212,7 @@ Alerts are triggered when the score crosses a threshold.
 
 ---
 
-## 🚀 Future Improvements
+##  Future Improvements
 
 * Persistent user profiles
 * Role-based anomaly thresholds
@@ -225,20 +225,8 @@ Alerts are triggered when the score crosses a threshold.
 
 ---
 
-## 📑 Course Report Sections
 
-* Problem Statement
-* Literature Review
-* Dataset & Feature Design
-* Real-Time Collection Methodology
-* Behavior Profiling Approach
-* Detection Strategy
-* Experimental Results
-* Limitations & Future Work
-
----
-
-## 📌 Summary
+##  Summary
 
 This project is a **real-time insider threat detection prototype** that:
 
