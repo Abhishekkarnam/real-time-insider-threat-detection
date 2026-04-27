@@ -1,0 +1,9 @@
+# Standard-library-only baseline starter.
+# Add packages here as the project grows, for example:
+pandas
+# numpy
+# scikit-learn
+psutil
+scapy
+streamlit
+streamlit-autorefresh
