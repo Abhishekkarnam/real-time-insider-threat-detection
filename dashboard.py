@@ -81,8 +81,8 @@ def build_sidebar(events_df: pd.DataFrame) -> dict[str, object]:
     run_collector = st.sidebar.toggle("Run real-time collector", value=True)
     collector_backend = st.sidebar.selectbox(
         "Collector backend",
-        ["psutil", "scapy"],
-        help="Use psutil for process/network connections or scapy for packet capture.",
+        ["psutil", "scapy", "putty"],
+        help="Use psutil for process/network connections, scapy for packet capture, or putty for PuTTY SSH/Telnet/serial port monitoring.",
     )
     ignore_localhost = st.sidebar.toggle("Ignore localhost traffic", value=True)
 

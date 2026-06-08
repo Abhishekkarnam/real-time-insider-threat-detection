@@ -3,12 +3,16 @@ from __future__ import annotations
 import csv
 import getpass
 import ipaddress
+import json
+import re
 import socket
 import threading
 import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 try:
     import psutil
@@ -41,6 +45,7 @@ _collector_thread: threading.Thread | None = None
 _collector_stop_event: threading.Event | None = None
 _collector_config: tuple[Path, int, bool, str] | None = None
 _seen_connections: set[tuple[object, ...]] = set()
+_seen_putty_ports: set[tuple[object, ...]] = set()
 _last_io_counters: Any | None = None
 
 
@@ -111,6 +116,12 @@ def _action_from_status(status: str) -> str:
     if normalized:
         return f"connection_{normalized}"
     return "network_activity"
+
+
+def _putty_port_action(protocol: str, port: int | str | None, status: str = "") -> str:
+    port_text = f"_port_{port}" if port else ""
+    status_text = f"_{status.lower()}" if status else ""
+    return f"putty_{protocol.lower()}{port_text}{status_text}"
 
 
 def _username_for_pid(pid: int | None) -> str:
@@ -196,6 +207,52 @@ def _append_rows(csv_path: Path, rows: list[dict[str, str | int]]) -> int:
     return len(rows)
 
 
+def _tag_rows_with_client_id(
+    rows: list[dict[str, str | int]],
+    client_id: str | None,
+) -> list[dict[str, str | int]]:
+    if not client_id:
+        return rows
+
+    tagged_rows: list[dict[str, str | int]] = []
+    for row in rows:
+        tagged_row = row.copy()
+        tagged_row["user_id"] = f"{client_id}:{tagged_row['user_id']}"
+        tagged_rows.append(tagged_row)
+    return tagged_rows
+
+
+def send_rows_to_server(
+    server_url: str,
+    rows: list[dict[str, str | int]],
+    timeout_seconds: int = 5,
+) -> int:
+    if not rows:
+        return 0
+
+    payload = json.dumps({"events": rows}).encode("utf-8")
+    request = Request(
+        server_url,
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+
+    try:
+        with urlopen(request, timeout=timeout_seconds) as response:
+            response_body = response.read().decode("utf-8")
+    except (HTTPError, URLError, TimeoutError, OSError) as error:
+        print(f"Unable to send events to collector server: {error}")
+        return 0
+
+    try:
+        response_data = json.loads(response_body or "{}")
+    except json.JSONDecodeError:
+        return len(rows)
+
+    return int(response_data.get("accepted", len(rows)))
+
+
 def _build_rows(
     connections: Iterable[Any],
     ignore_localhost: bool,
@@ -241,13 +298,12 @@ def _build_rows(
     ]
 
 
-def _collect_once_psutil(
-    csv_path: Path = DEFAULT_DATA_PATH,
+def _collect_rows_psutil(
     ignore_localhost: bool = True,
-) -> int:
+) -> list[dict[str, str | int]]:
     if psutil is None:
         print("psutil is not installed. Run `python -m pip install -r requirements.txt`.")
-        return 0
+        return []
 
     try:
         connections = psutil.net_connections(kind="inet")
@@ -257,13 +313,105 @@ def _collect_once_psutil(
             "Run PowerShell as Administrator for complete visibility. "
             f"Details: {error}"
         )
-        return 0
+        return []
     except (psutil.Error, OSError) as error:
         print(f"Unable to read network connections safely: {error}")
-        return 0
+        return []
 
-    rows = _build_rows(connections, ignore_localhost=ignore_localhost)
-    return _append_rows(csv_path, rows)
+    return _build_rows(connections, ignore_localhost=ignore_localhost)
+
+
+def _putty_serial_port_from_cmdline(cmdline: list[str]) -> str | None:
+    normalized = " ".join(cmdline)
+    serial_match = re.search(r"(?:-serial\s+)?\b(COM\d+)\b", normalized, flags=re.IGNORECASE)
+    if serial_match:
+        return serial_match.group(1).upper()
+    return None
+
+
+def _collect_rows_putty(
+    ignore_localhost: bool = True,
+) -> list[dict[str, str | int]]:
+    if psutil is None:
+        print("psutil is not installed. Run `python -m pip install -r requirements.txt`.")
+        return []
+
+    rows: list[dict[str, str | int]] = []
+    captured_at = datetime.now().replace(microsecond=0).isoformat()
+
+    for process in psutil.process_iter(["pid", "name", "username", "cmdline"]):
+        try:
+            process_name = (process.info.get("name") or "").lower()
+            if process_name not in {"putty.exe", "putty"}:
+                continue
+
+            pid = int(process.info["pid"])
+            user_id = process.info.get("username") or _username_for_pid(pid)
+            cmdline = process.info.get("cmdline") or []
+            serial_port = _putty_serial_port_from_cmdline(cmdline)
+
+            if serial_port:
+                signature = (pid, "serial", serial_port)
+                if signature not in _seen_putty_ports:
+                    _seen_putty_ports.add(signature)
+                    rows.append(
+                        {
+                            "timestamp": captured_at,
+                            "user_id": str(user_id),
+                            "source_ip": socket.gethostname(),
+                            "destination_ip": serial_port,
+                            "protocol": "SERIAL",
+                            "action": _putty_port_action("serial", serial_port),
+                            "bytes_sent": 0,
+                            "bytes_received": 0,
+                        }
+                    )
+
+            try:
+                connections = process.net_connections(kind="inet")
+            except (psutil.AccessDenied, psutil.NoSuchProcess, psutil.ZombieProcess, OSError):
+                connections = []
+
+            for connection in connections:
+                source_ip = _address_ip(connection.laddr)
+                destination_ip = _address_ip(connection.raddr)
+                destination_port = _address_port(connection.raddr)
+
+                if not source_ip or not destination_ip or destination_port is None:
+                    continue
+                if ignore_localhost and (_is_loopback(source_ip) or _is_loopback(destination_ip)):
+                    continue
+
+                signature = (
+                    pid,
+                    "network",
+                    source_ip,
+                    _address_port(connection.laddr),
+                    destination_ip,
+                    destination_port,
+                    connection.status,
+                )
+                if signature in _seen_putty_ports:
+                    continue
+
+                _seen_putty_ports.add(signature)
+                protocol = "SSH" if destination_port == 22 else "TELNET" if destination_port == 23 else "TCP"
+                rows.append(
+                    {
+                        "timestamp": captured_at,
+                        "user_id": str(user_id),
+                        "source_ip": source_ip,
+                        "destination_ip": destination_ip,
+                        "protocol": protocol,
+                        "action": _putty_port_action(protocol, destination_port, connection.status),
+                        "bytes_sent": 0,
+                        "bytes_received": 0,
+                    }
+                )
+        except (psutil.NoSuchProcess, psutil.ZombieProcess, psutil.AccessDenied, OSError):
+            continue
+
+    return rows
 
 
 def _build_packet_rows(
@@ -305,14 +453,13 @@ def _build_packet_rows(
     return rows
 
 
-def _collect_once_scapy(
-    csv_path: Path = DEFAULT_DATA_PATH,
+def _collect_rows_scapy(
     ignore_localhost: bool = True,
     capture_seconds: int = COLLECTION_INTERVAL_SECONDS,
-) -> int:
+) -> list[dict[str, str | int]]:
     if sniff is None:
         print("scapy is not installed. Run `python -m pip install -r requirements.txt`.")
-        return 0
+        return []
 
     try:
         packets = sniff(filter="ip", timeout=capture_seconds, store=True)
@@ -322,19 +469,37 @@ def _collect_once_scapy(
             "Run PowerShell as Administrator and make sure Npcap is installed. "
             f"Details: {error}"
         )
-        return 0
+        return []
     except OSError as error:
         print(
             "Unable to capture packets with Scapy. On Windows, install Npcap "
             f"and run as Administrator. Details: {error}"
         )
-        return 0
+        return []
     except Exception as error:
         print(f"Unable to capture packets safely with Scapy: {error}")
-        return 0
+        return []
 
-    rows = _build_packet_rows(packets, ignore_localhost=ignore_localhost)
-    return _append_rows(csv_path, rows)
+    return _build_packet_rows(packets, ignore_localhost=ignore_localhost)
+
+
+def collect_rows_once(
+    ignore_localhost: bool = True,
+    backend: str = "psutil",
+    capture_seconds: int = COLLECTION_INTERVAL_SECONDS,
+    client_id: str | None = None,
+) -> list[dict[str, str | int]]:
+    if backend == "scapy":
+        rows = _collect_rows_scapy(
+            ignore_localhost=ignore_localhost,
+            capture_seconds=capture_seconds,
+        )
+    elif backend == "putty":
+        rows = _collect_rows_putty(ignore_localhost=ignore_localhost)
+    else:
+        rows = _collect_rows_psutil(ignore_localhost=ignore_localhost)
+
+    return _tag_rows_with_client_id(rows, client_id)
 
 
 def collect_once(
@@ -342,17 +507,19 @@ def collect_once(
     ignore_localhost: bool = True,
     backend: str = "psutil",
     capture_seconds: int = COLLECTION_INTERVAL_SECONDS,
+    server_url: str | None = None,
+    client_id: str | None = None,
 ) -> int:
     ensure_events_file(csv_path)
-
-    if backend == "scapy":
-        return _collect_once_scapy(
-            csv_path=csv_path,
-            ignore_localhost=ignore_localhost,
-            capture_seconds=capture_seconds,
-        )
-
-    return _collect_once_psutil(csv_path=csv_path, ignore_localhost=ignore_localhost)
+    rows = collect_rows_once(
+        ignore_localhost=ignore_localhost,
+        backend=backend,
+        capture_seconds=capture_seconds,
+        client_id=client_id,
+    )
+    accepted_count = send_rows_to_server(server_url, rows) if server_url else 0
+    local_count = _append_rows(csv_path, rows)
+    return max(local_count, accepted_count)
 
 
 def collect_and_append_events(
@@ -360,6 +527,8 @@ def collect_and_append_events(
     interval_seconds: int = COLLECTION_INTERVAL_SECONDS,
     ignore_localhost: bool = True,
     backend: str = "psutil",
+    server_url: str | None = None,
+    client_id: str | None = None,
     stop_event: threading.Event | None = None,
 ) -> None:
     ensure_events_file(csv_path)
@@ -370,6 +539,8 @@ def collect_and_append_events(
             ignore_localhost=ignore_localhost,
             backend=backend,
             capture_seconds=interval_seconds,
+            server_url=server_url,
+            client_id=client_id,
         )
 
         if backend == "scapy":

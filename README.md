@@ -87,6 +87,15 @@ timestamp,user_id,source_ip,destination_ip,protocol,action,bytes_sent,bytes_rece
   - Npcap installed
   - Active network traffic
 
+### 3. putty
+- Monitors active PuTTY processes for hardware/admin access sessions
+- Captures:
+  - SSH sessions, usually destination port `22`
+  - Telnet sessions, usually destination port `23`
+  - Serial console sessions such as `COM3`, when visible in the PuTTY command line
+- Best for hardware implementation demos where PuTTY is used to connect to a router,
+  switch, microcontroller, or other console device
+
 ---
 
 ##  Repository Structure
@@ -157,7 +166,7 @@ streamlit run dashboard.py
 In the dashboard sidebar:
 
 * Enable **Run real-time collector**
-* Select backend: `psutil` or `scapy`
+* Select backend: `psutil`, `scapy`, or `putty`
 * Enable **Auto-refresh**
 * Adjust refresh interval
 
@@ -176,6 +185,96 @@ python real_time_collector.py --backend psutil
 ```powershell
 python real_time_collector.py --backend scapy
 ```
+
+### PuTTY hardware / port monitoring
+
+Start PuTTY, connect to your SSH/Telnet device or serial console, then run:
+
+```powershell
+python real_time_collector.py --backend putty
+```
+
+For a serial hardware console, launch PuTTY with the COM port so the collector can
+identify it:
+
+```powershell
+putty.exe -serial COM3 -sercfg 9600,8,n,1,N
+python real_time_collector.py --backend putty
+```
+
+---
+
+##  2 Client PCs + 1 Collector PC Setup
+
+Use this when PuTTY runs on two separate client/user machines and one central PC
+stores the combined events and runs the dashboard.
+
+### Collector PC
+
+Find the collector PC IP address:
+
+```powershell
+ipconfig
+```
+
+Start the receiver server:
+
+```powershell
+python collector_server.py --host 0.0.0.0 --port 5050
+```
+
+In another PowerShell window on the same collector PC, start the dashboard:
+
+```powershell
+streamlit run dashboard.py
+```
+
+The receiver writes all incoming client events to:
+
+```text
+data/network_events.csv
+```
+
+### Client PC 1
+
+Start PuTTY and connect to the hardware/device. Then run:
+
+```powershell
+python real_time_collector.py --backend putty --client-id client1 --send-to http://COLLECTOR_IP:5050/events
+```
+
+Replace `COLLECTOR_IP` with the collector PC address, for example:
+
+```powershell
+python real_time_collector.py --backend putty --client-id client1 --send-to http://192.168.1.10:5050/events
+```
+
+### Client PC 2
+
+Start PuTTY and connect to the hardware/device. Then run:
+
+```powershell
+python real_time_collector.py --backend putty --client-id client2 --send-to http://COLLECTOR_IP:5050/events
+```
+
+### Serial Hardware Example
+
+If Client PC 1 connects to a serial console:
+
+```powershell
+putty.exe -serial COM3 -sercfg 9600,8,n,1,N
+python real_time_collector.py --backend putty --client-id client1 --send-to http://COLLECTOR_IP:5050/events
+```
+
+If Client PC 2 connects to a different serial console:
+
+```powershell
+putty.exe -serial COM4 -sercfg 9600,8,n,1,N
+python real_time_collector.py --backend putty --client-id client2 --send-to http://COLLECTOR_IP:5050/events
+```
+
+Client events are tagged in the `user_id` field as `client1:username` and
+`client2:username`, so the dashboard can separate activity by PC/user.
 
 ### Include localhost traffic
 
