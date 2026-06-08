@@ -186,6 +186,29 @@ python real_time_collector.py --backend psutil
 python real_time_collector.py --backend scapy
 ```
 
+For a switch mirror setup, list capture interfaces first:
+
+```powershell
+python real_time_collector.py --list-interfaces
+```
+
+Then capture on the collector PC Ethernet adapter connected to the mirror
+destination port:
+
+```powershell
+python real_time_collector.py --backend scapy --interface "INTERFACE_NAME"
+```
+
+Mirrored packets do not include the Windows username from PC1 and PC2. To make
+the dashboard show PC labels instead of the collector username, map client IPs:
+
+```powershell
+python real_time_collector.py --backend scapy --interface "INTERFACE_NAME" --client-map 192.168.1.11=pc1,192.168.1.12=pc2
+```
+
+Replace `INTERFACE_NAME` with the interface from `--list-interfaces`, and replace
+the IP addresses with the real PC1 and PC2 IPv4 addresses from `ipconfig`.
+
 ### PuTTY hardware / port monitoring
 
 Start PuTTY, connect to your SSH/Telnet device or serial console, then run:

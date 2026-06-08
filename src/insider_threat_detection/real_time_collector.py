@@ -20,9 +20,9 @@ except ImportError:
     psutil = None
 
 try:
-    from scapy.all import ICMP, IP, TCP, UDP, sniff
+    from scapy.all import ICMP, IP, TCP, UDP, get_if_list, sniff
 except ImportError:
-    ICMP = IP = TCP = UDP = sniff = None
+    ICMP = IP = TCP = UDP = get_if_list = sniff = None
 
 
 FIELDNAMES = [
@@ -55,6 +55,15 @@ def is_psutil_available() -> bool:
 
 def is_scapy_available() -> bool:
     return sniff is not None and IP is not None
+
+
+def scapy_interfaces() -> list[str]:
+    if get_if_list is None:
+        return []
+    try:
+        return list(get_if_list())
+    except Exception:
+        return []
 
 
 def ensure_events_file(csv_path: Path = DEFAULT_DATA_PATH) -> None:
@@ -220,6 +229,22 @@ def _tag_rows_with_client_id(
         tagged_row["user_id"] = f"{client_id}:{tagged_row['user_id']}"
         tagged_rows.append(tagged_row)
     return tagged_rows
+
+
+def parse_client_map(client_map: str | None) -> dict[str, str]:
+    if not client_map:
+        return {}
+
+    parsed: dict[str, str] = {}
+    for entry in client_map.split(","):
+        if "=" not in entry:
+            continue
+        ip_address, label = entry.split("=", maxsplit=1)
+        ip_address = ip_address.strip()
+        label = label.strip()
+        if ip_address and label:
+            parsed[ip_address] = label
+    return parsed
 
 
 def send_rows_to_server(
@@ -417,9 +442,11 @@ def _collect_rows_putty(
 def _build_packet_rows(
     packets: Iterable[Any],
     ignore_localhost: bool,
+    client_ip_labels: dict[str, str] | None = None,
 ) -> list[dict[str, str | int]]:
     local_ips = _local_ip_addresses()
     current_user = getpass.getuser()
+    client_ip_labels = client_ip_labels or {}
     rows: list[dict[str, str | int]] = []
 
     for packet in packets:
@@ -435,12 +462,17 @@ def _build_packet_rows(
 
         packet_size = len(packet)
         is_outbound = source_ip in local_ips
+        user_id = (
+            client_ip_labels.get(source_ip)
+            or client_ip_labels.get(destination_ip)
+            or current_user
+        )
         captured_at = datetime.fromtimestamp(float(packet.time)).replace(microsecond=0).isoformat()
 
         rows.append(
             {
                 "timestamp": captured_at,
-                "user_id": current_user,
+                "user_id": user_id,
                 "source_ip": source_ip,
                 "destination_ip": destination_ip,
                 "protocol": _protocol_from_packet(packet),
@@ -456,13 +488,15 @@ def _build_packet_rows(
 def _collect_rows_scapy(
     ignore_localhost: bool = True,
     capture_seconds: int = COLLECTION_INTERVAL_SECONDS,
+    interface: str | None = None,
+    client_ip_labels: dict[str, str] | None = None,
 ) -> list[dict[str, str | int]]:
     if sniff is None:
         print("scapy is not installed. Run `python -m pip install -r requirements.txt`.")
         return []
 
     try:
-        packets = sniff(filter="ip", timeout=capture_seconds, store=True)
+        packets = sniff(filter="ip", iface=interface, timeout=capture_seconds, store=True)
     except PermissionError as error:
         print(
             "Permission denied while capturing packets. "
@@ -480,7 +514,11 @@ def _collect_rows_scapy(
         print(f"Unable to capture packets safely with Scapy: {error}")
         return []
 
-    return _build_packet_rows(packets, ignore_localhost=ignore_localhost)
+    return _build_packet_rows(
+        packets,
+        ignore_localhost=ignore_localhost,
+        client_ip_labels=client_ip_labels,
+    )
 
 
 def collect_rows_once(
@@ -488,11 +526,15 @@ def collect_rows_once(
     backend: str = "psutil",
     capture_seconds: int = COLLECTION_INTERVAL_SECONDS,
     client_id: str | None = None,
+    interface: str | None = None,
+    client_ip_labels: dict[str, str] | None = None,
 ) -> list[dict[str, str | int]]:
     if backend == "scapy":
         rows = _collect_rows_scapy(
             ignore_localhost=ignore_localhost,
             capture_seconds=capture_seconds,
+            interface=interface,
+            client_ip_labels=client_ip_labels,
         )
     elif backend == "putty":
         rows = _collect_rows_putty(ignore_localhost=ignore_localhost)
@@ -509,6 +551,8 @@ def collect_once(
     capture_seconds: int = COLLECTION_INTERVAL_SECONDS,
     server_url: str | None = None,
     client_id: str | None = None,
+    interface: str | None = None,
+    client_ip_labels: dict[str, str] | None = None,
 ) -> int:
     ensure_events_file(csv_path)
     rows = collect_rows_once(
@@ -516,6 +560,8 @@ def collect_once(
         backend=backend,
         capture_seconds=capture_seconds,
         client_id=client_id,
+        interface=interface,
+        client_ip_labels=client_ip_labels,
     )
     accepted_count = send_rows_to_server(server_url, rows) if server_url else 0
     local_count = _append_rows(csv_path, rows)
@@ -529,6 +575,8 @@ def collect_and_append_events(
     backend: str = "psutil",
     server_url: str | None = None,
     client_id: str | None = None,
+    interface: str | None = None,
+    client_ip_labels: dict[str, str] | None = None,
     stop_event: threading.Event | None = None,
 ) -> None:
     ensure_events_file(csv_path)
@@ -541,6 +589,8 @@ def collect_and_append_events(
             capture_seconds=interval_seconds,
             server_url=server_url,
             client_id=client_id,
+            interface=interface,
+            client_ip_labels=client_ip_labels,
         )
 
         if backend == "scapy":

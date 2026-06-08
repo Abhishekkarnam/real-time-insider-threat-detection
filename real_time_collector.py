@@ -12,6 +12,8 @@ if str(SRC_PATH) not in sys.path:
 
 from insider_threat_detection.real_time_collector import (  # noqa: E402
     collect_and_append_events,
+    parse_client_map,
+    scapy_interfaces,
 )
 
 
@@ -28,7 +30,28 @@ if __name__ == "__main__":
         "--client-id",
         help="Optional client label added to user_id, for example client1 or lab-pc-2.",
     )
+    parser.add_argument(
+        "--interface",
+        help="Network interface name for Scapy capture. Use the collector Ethernet adapter connected to mirror port 1/1/12.",
+    )
+    parser.add_argument(
+        "--list-interfaces",
+        action="store_true",
+        help="List Scapy network interfaces and exit.",
+    )
+    parser.add_argument(
+        "--client-map",
+        help="Comma-separated IP labels for mirrored traffic, for example 192.168.1.11=pc1,192.168.1.12=pc2.",
+    )
     args = parser.parse_args()
+
+    if args.list_interfaces:
+        interfaces = scapy_interfaces()
+        if not interfaces:
+            print("No Scapy interfaces found. Install Npcap and run PowerShell as Administrator.")
+        for interface in interfaces:
+            print(interface)
+        raise SystemExit(0)
 
     try:
         collect_and_append_events(
@@ -38,6 +61,8 @@ if __name__ == "__main__":
             backend=args.backend,
             server_url=args.send_to,
             client_id=args.client_id,
+            interface=args.interface,
+            client_ip_labels=parse_client_map(args.client_map),
         )
     except KeyboardInterrupt:
         print("Stopped real-time network collector.")
