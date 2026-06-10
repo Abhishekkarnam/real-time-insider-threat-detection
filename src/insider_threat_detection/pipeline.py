@@ -35,9 +35,20 @@ def parse_event(row: dict[str, str]) -> NetworkEvent:
 
 
 def load_events(csv_path: Path) -> list[NetworkEvent]:
+    if not csv_path.exists() or csv_path.stat().st_size == 0:
+        return []
+
+    events: list[NetworkEvent] = []
     with csv_path.open("r", newline="", encoding="utf-8") as file:
         reader = csv.DictReader(file)
-        return [parse_event(row) for row in reader]
+        for row in reader:
+            try:
+                if not row or any(row.get(field) in (None, "") for field in reader.fieldnames or []):
+                    continue
+                events.append(parse_event(row))
+            except (KeyError, TypeError, ValueError):
+                continue
+    return events
 
 
 def analyze_events(csv_path: Path) -> tuple[list[dict[str, object]], list[dict[str, str]]]:

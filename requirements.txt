@@ -1,7 +1,8 @@
-# Standard-library-only baseline starter.
-# Add packages here as the project grows, for example:
 pandas
-# numpy
-# scikit-learn
 streamlit
 streamlit-autorefresh
+fastapi
+uvicorn
+pydantic
+scikit-learn
+tensorflow

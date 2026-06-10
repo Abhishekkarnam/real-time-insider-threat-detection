@@ -127,3 +127,83 @@ It then scores an event higher when it contains multiple deviations from the use
 - Limitations and future work
 
 This starter is designed to help you begin immediately, then improve the system step by step as your course project grows.
+
+## Web Application Version
+
+This copy now includes a FastAPI + React web application with an AI firewall
+advisor.
+
+### Backend
+
+```powershell
+python -m pip install -r requirements.txt
+python -m pip install -e .
+uvicorn backend.app:app --reload
+```
+
+The API runs at:
+
+```text
+http://127.0.0.1:8000
+```
+
+Main endpoints:
+
+```text
+GET  /api/summary
+GET  /api/events
+GET  /api/alerts
+GET  /api/firewall/recommendations
+GET  /api/firewall/rules
+POST /api/firewall/approve
+POST /api/firewall/reject
+POST /api/firewall/unblock
+POST /api/collector/start
+POST /api/collector/stop
+POST /api/events
+```
+
+### Frontend
+
+Open a second terminal:
+
+```powershell
+cd frontend
+npm install
+npm run dev
+```
+
+The React dashboard runs at:
+
+```text
+http://127.0.0.1:5173
+```
+
+### AI Firewall Advisor
+
+The firewall advisor creates simulated firewall recommendations and rules. It
+does not modify the real Windows firewall by default.
+
+The first version uses a deterministic AI policy. If you train the neural
+network, the advisor automatically uses the saved MLP model:
+
+```powershell
+python -m pip install -e .
+python -m insider_threat_detection.train_firewall_nn --csv-path data\network_events.csv
+```
+
+The model outputs:
+
+```text
+allow
+monitor
+block
+quarantine
+```
+
+Saved model files:
+
+```text
+models/firewall_nn.keras
+models/firewall_preprocessor.pkl
+```
