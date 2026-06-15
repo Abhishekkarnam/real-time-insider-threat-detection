@@ -1,3 +1,10 @@
+Metadata-Version: 2.4
+Name: insider-threat-detection
+Version: 0.1.0
+Summary: Course starter for real-time insider threat detection using network behavior profiling
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+
 # Real-Time Insider Threat Detection Using Network Behavior Profiling
 
 This repository is a starter implementation for a course project focused on detecting insider threats by modeling user network behavior over time and flagging deviations in real time.
@@ -144,7 +151,7 @@ uvicorn backend.app:app --reload
 The API runs at:
 
 ```text
-http://127.0.0.1:8000
+http://127.0.0.1:8001
 ```
 
 Main endpoints:
@@ -179,5 +186,31 @@ The React dashboard runs at:
 http://127.0.0.1:5173
 ```
 
-### Local
-Just open `index.html` in a browser.
+### AI Firewall Advisor
+
+The firewall advisor creates simulated firewall recommendations and rules. It
+does not modify the real Windows firewall by default.
+
+The first version uses a deterministic AI policy. If you train the neural
+network, the advisor automatically uses the saved MLP model:
+
+```powershell
+python -m pip install -e .
+python -m insider_threat_detection.train_firewall_nn --csv-path data\network_events.csv
+```
+
+The model outputs:
+
+```text
+allow
+monitor
+block
+quarantine
+```
+
+Saved model files:
+
+```text
+models/firewall_nn.keras
+models/firewall_preprocessor.pkl
+```
