@@ -179,5 +179,26 @@ The React dashboard runs at:
 http://127.0.0.1:5173
 ```
 
+### Autoencoder anomaly model
+
+Train the neural anomaly detector after you have a baseline CSV with mostly
+normal traffic:
+
+```powershell
+python src\insider_threat_detection\train_firewall_nn.py --csv-path data\network_events.csv
+```
+
+The trainer fits preprocessing on normal/low-risk events, uses Keras embedding
+layers for `user_id`, `source_ip`, and `destination_ip`, trains an autoencoder
+to reconstruct normal behavior features, and stores the 95th percentile
+reconstruction-error threshold in:
+
+```text
+models/firewall_preprocessor.pkl
+```
+
+At inference time, events whose reconstruction error exceeds that threshold are
+treated as anomalous. Larger errors escalate from `block` to `quarantine`.
+
 ### Local
 Just open `index.html` in a browser.

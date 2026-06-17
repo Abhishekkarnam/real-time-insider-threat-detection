@@ -1,4 +1,5 @@
 from __future__ import annotations
+from pathlib import Path
 
 import csv
 import sys
@@ -16,6 +17,10 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SRC_PATH = PROJECT_ROOT / "src"
 if str(SRC_PATH) not in sys.path:
     sys.path.insert(0, str(SRC_PATH))
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+csv_path = BASE_DIR / "data" / "network_events.csv"
 
 from insider_threat_detection.ai_firewall_advisor import recommend_firewall_action
 from insider_threat_detection.firewall import (
@@ -76,7 +81,7 @@ class RuleActionPayload(BaseModel):
 app = FastAPI(title="Insider Threat Web API", version="1.0.0")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -225,11 +230,11 @@ def alerts() -> dict[str, Any]:
     _, alert_rows = dashboard_data()
     return {"alerts": alert_rows}
 
+import time
 
 @app.get("/api/summary")
-def summary() -> dict[str, Any]:
+def summary():
     scored_events, alert_rows = dashboard_data()
-    sync_firewall_recommendations()
     return build_summary(scored_events, alert_rows)
 
 
@@ -251,8 +256,8 @@ def simulate_sample() -> dict[str, str]:
 
 @app.get("/api/firewall/recommendations")
 def firewall_recommendations() -> dict[str, Any]:
-    return {"recommendations": sync_firewall_recommendations()}
-
+    print("recommendations endpoint called")
+    return {"recommendations": []}
 
 @app.get("/api/firewall/rules")
 def firewall_rules() -> dict[str, Any]:

@@ -28,7 +28,7 @@ import {
 } from "recharts";
 import "./styles.css";
 
-const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8001";
+const API_BASE = import.meta.env.VITE_API_BASE || "";
 
 async function api(path, options = {}) {
   const response = await fetch(`${API_BASE}${path}`, {
@@ -129,7 +129,7 @@ function FirewallAdvisor({ recommendations, rules, onAction }) {
         <ShieldAlert size={20} />
         <div>
           <h2>AI Firewall Advisor</h2>
-          <p>MLP-ready recommendation layer with simulated enforcement.</p>
+          <p>Autoencoder anomaly layer with simulated enforcement.</p>
         </div>
       </div>
 
@@ -239,25 +239,41 @@ function App() {
   const [collector, setCollector] = React.useState({});
   const [error, setError] = React.useState("");
 
-  const refresh = React.useCallback(async () => {
-    try {
-      const [summaryData, eventData, recommendationData, ruleData, collectorData] = await Promise.all([
-        api("/api/summary"),
-        api("/api/events"),
-        api("/api/firewall/recommendations"),
-        api("/api/firewall/rules"),
-        api("/api/collector/status"),
-      ]);
-      setSummary(summaryData);
-      setEvents((eventData.events || []).slice().reverse());
-      setRecommendations((recommendationData.recommendations || []).slice().reverse());
-      setRules((ruleData.rules || []).slice().reverse());
-      setCollector(collectorData);
-      setError("");
-    } catch (err) {
-      setError(err.message);
-    }
-  }, []);
+const refresh = React.useCallback(async () => {
+  try {
+    const summaryData = await api("/api/summary");
+    const eventData = await api("/api/events");
+    const recommendationData = await api("/api/firewall/recommendations");
+    const ruleData = await api("/api/firewall/rules");
+    const collectorData = await api("/api/collector/status");
+
+    setSummary(summaryData);
+
+    setEvents(
+      Array.isArray(eventData.events)
+        ? eventData.events.slice().reverse()
+        : []
+    );
+
+    setRecommendations(
+      recommendationData.recommendations || []
+    );
+
+    setRules(
+      ruleData.rules || []
+    );
+
+    setCollector(
+      collectorData || {}
+    );
+
+    setError("");
+  } catch (err) {
+    console.error(err);
+    setError(err.message || "Failed to load data");
+  }
+}, []);
+
 
   React.useEffect(() => {
     refresh();
