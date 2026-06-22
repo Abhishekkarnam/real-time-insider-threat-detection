@@ -4,6 +4,7 @@ import csv
 import sys
 import threading
 import time
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -21,11 +22,14 @@ from insider_threat_detection.ai_firewall_advisor import recommend_firewall_acti
 from insider_threat_detection.firewall import (
     approve_recommendation,
     deactivate_rule,
+    execute_firewall_unblock,
     list_recommendations,
     list_rules,
     make_event_key,
     reject_recommendation,
+    RULE_FIELDS,
     upsert_recommendations,
+    _write_csv,
 )
 from insider_threat_detection.pipeline import analyze_events
 from insider_threat_detection.simulator import (
@@ -43,6 +47,8 @@ RULES_PATH = PROJECT_ROOT / "data" / "firewall_rules.csv"
 collector_thread: threading.Thread | None = None
 collector_stop_event: threading.Event | None = None
 collector_config: dict[str, int] = {"interval_seconds": 5, "events_per_batch": 6}
+expiration_thread: threading.Thread | None = None
+expiration_stop_event: threading.Event | None = None
 
 
 class EventIn(BaseModel):
@@ -113,7 +119,8 @@ def sync_firewall_recommendations() -> list[dict[str, str]]:
     scored_events, _ = dashboard_data()
     new_recommendations: list[dict[str, Any]] = []
     for event in scored_events:
-        if not event.get("alert"):
+        is_test_site_access = "test_site_access" in str(event.get("action", "")).lower()
+        if not event.get("alert") and not is_test_site_access:
             continue
         recommendation = recommend_firewall_action(event)
         new_recommendations.append(
@@ -202,6 +209,62 @@ def collector_loop(stop_event: threading.Event, interval_seconds: int, events_pe
         stop_event.wait(interval_seconds)
 
 
+def expire_firewall_rules_once() -> int:
+    rules = list_rules(RULES_PATH)
+    now = datetime.now()
+    expired_count = 0
+
+    for rule in rules:
+        if rule.get("status") != "active":
+            continue
+
+        try:
+            created_at = datetime.fromisoformat(rule["created_at"])
+            duration_minutes = int(float(rule.get("duration_minutes") or 0))
+        except (KeyError, TypeError, ValueError):
+            continue
+
+        if duration_minutes <= 0:
+            continue
+        if now < created_at + timedelta(minutes=duration_minutes):
+            continue
+
+        execute_firewall_unblock(rule.get("source_ip", ""), rule.get("port", ""))
+        rule["status"] = "inactive"
+        expired_count += 1
+
+    if expired_count:
+        _write_csv(RULES_PATH, RULE_FIELDS, rules)
+    return expired_count
+
+
+def expiration_loop(stop_event: threading.Event, interval_seconds: int = 60) -> None:
+    while not stop_event.is_set():
+        expire_firewall_rules_once()
+        stop_event.wait(interval_seconds)
+
+
+@app.on_event("startup")
+def start_expiration_worker() -> None:
+    global expiration_stop_event, expiration_thread
+    if expiration_thread is not None and expiration_thread.is_alive():
+        return
+    expiration_stop_event = threading.Event()
+    expiration_thread = threading.Thread(
+        target=expiration_loop,
+        args=(expiration_stop_event,),
+        daemon=True,
+        name="firewall-rule-expiration",
+    )
+    expiration_thread.start()
+
+
+@app.on_event("shutdown")
+def stop_expiration_worker() -> None:
+    if expiration_stop_event is not None:
+        expiration_stop_event.set()
+
+
 @app.get("/api/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
@@ -256,6 +319,7 @@ def firewall_recommendations() -> dict[str, Any]:
 
 @app.get("/api/firewall/rules")
 def firewall_rules() -> dict[str, Any]:
+    expire_firewall_rules_once()
     return {"rules": list_rules(RULES_PATH)}
 
 

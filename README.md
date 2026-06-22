@@ -138,13 +138,13 @@ advisor.
 ```powershell
 python -m pip install -r requirements.txt
 python -m pip install -e .
-uvicorn backend.app:app --reload
+uvicorn backend.app:app --host 0.0.0.0 --port 8001 --reload
 ```
 
 The API runs at:
 
 ```text
-http://127.0.0.1:8000
+http://SERVER_IP:8001
 ```
 
 Main endpoints:
@@ -179,5 +179,73 @@ The React dashboard runs at:
 http://127.0.0.1:5173
 ```
 
-### Local
-Just open `index.html` in a browser.
+### Real Firewall + Test Site Demo
+
+Run the backend as Administrator/root because real firewall rules require
+elevated privileges.
+
+On the server PC, start the backend:
+
+```powershell
+uvicorn backend.app:app --host 0.0.0.0 --port 8001 --reload
+```
+
+Start the React dashboard:
+
+```powershell
+cd frontend
+npm run dev -- --host 0.0.0.0 --port 5173
+```
+
+Serve the local Test Site on the server PC:
+
+```powershell
+python scripts/serve_test_site.py --host 0.0.0.0 --port 8080
+```
+
+Client PCs should open:
+
+```text
+http://SERVER_IP:8080
+```
+
+Then run the client logger on each client PC:
+
+```powershell
+python scripts/client_logger.py --server-api http://SERVER_IP:8001/api/events --test-site-host SERVER_IP --test-site-port 8080 --client-id client1
+```
+
+For a controlled demo that generates traffic automatically:
+
+```powershell
+python scripts/client_logger.py --server-api http://SERVER_IP:8001/api/events --test-site-host SERVER_IP --test-site-port 8080 --client-id client1 --probe-test-site
+```
+
+When the AI Firewall Advisor recommendation is approved, the backend creates a
+real firewall rule on the server PC:
+
+- Windows: `New-NetFirewallRule` blocks inbound traffic from the client IP.
+- Linux: `ufw insert 1 deny` blocks traffic from the client IP.
+- If a port is known, only that Test Site port is blocked.
+- Expired rules are checked every 60 seconds and automatically unblocked.
+
+### Autoencoder anomaly model
+
+Train the neural anomaly detector after you have a baseline CSV with mostly
+normal traffic:
+
+```powershell
+python -m insider_threat_detection.train_firewall_nn --csv-path data\network_events.csv
+```
+
+The training script fits preprocessing on normal/low-risk events, uses Keras
+embedding layers for `user_id`, `source_ip`, and `destination_ip`, trains an
+autoencoder to reconstruct normal behavior features, and saves the 95th
+percentile reconstruction-error threshold in:
+
+```text
+models/firewall_preprocessor.pkl
+```
+
+At inference time, events whose reconstruction error exceeds that threshold are
+treated as anomalous. Larger errors escalate from `block` to `quarantine`.

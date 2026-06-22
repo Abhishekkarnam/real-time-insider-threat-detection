@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import pickle
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+import numpy as np
 
 
 ACTION_ALLOW = "allow"
@@ -43,12 +46,17 @@ def _score(value: Any) -> float:
 
 def _infer_port(protocol: str, action: str) -> int | None:
     normalized = f"{protocol} {action}".lower()
+    port_match = re.search(r"(?:port[_=\s-]?)(\d{1,5})", normalized)
+    if port_match:
+        return int(port_match.group(1))
     if "ssh" in normalized:
         return 22
     if "telnet" in normalized:
         return 23
     if "https" in normalized:
         return 443
+    if "http" in normalized:
+        return 80
     if "dns" in normalized:
         return 53
     return None
@@ -56,6 +64,12 @@ def _infer_port(protocol: str, action: str) -> int | None:
 
 def _has_reason(reasons: str, phrase: str) -> bool:
     return phrase in reasons.lower()
+
+
+def _to_dense(matrix: object) -> np.ndarray:
+    if hasattr(matrix, "toarray"):
+        matrix = matrix.toarray()
+    return np.asarray(matrix, dtype=np.float32)
 
 
 def _load_nn_assets() -> tuple[Any, dict[str, Any]] | None:
@@ -111,11 +125,44 @@ def _nn_action(alert: dict[str, Any]) -> tuple[str, float] | None:
                 }
             ]
         )
-        feature_columns = metadata["categorical_features"] + metadata["numeric_features"]
-        encoded = metadata["preprocessor"].transform(row[feature_columns])
-        probabilities = model.predict(encoded, verbose=0)[0]
-        action_index = int(probabilities.argmax())
-        return str(metadata["classes"][action_index]), float(probabilities[action_index])
+        if metadata.get("model_type") == "embedding_autoencoder":
+            embedded_features = metadata["embedded_features"]
+            small_categorical_features = metadata["small_categorical_features"]
+            numeric_features = metadata["numeric_features"]
+            dense_features = _to_dense(
+                metadata["dense_preprocessor"].transform(row[small_categorical_features + numeric_features])
+            )
+            model_inputs: dict[str, np.ndarray] = {"dense_features": dense_features}
+            normalized_indices: list[np.ndarray] = []
+            for feature in embedded_features:
+                vocab = metadata["vocabularies"][feature]
+                max_index = max(int(metadata["max_index_values"][feature]), 1)
+                index = int(vocab.get(_text(alert.get(feature)), 0))
+                model_inputs[f"{feature}_input"] = np.asarray([index], dtype=np.int32)
+                normalized_indices.append(np.asarray([[index / max_index]], dtype=np.float32))
+
+            target = np.concatenate([*normalized_indices, dense_features], axis=1)
+            reconstructed = model.predict(model_inputs, verbose=0)
+            reconstruction_error = float(((target - reconstructed) ** 2).mean())
+        else:
+            feature_columns = metadata["categorical_features"] + metadata["numeric_features"]
+            encoded = metadata["preprocessor"].transform(row[feature_columns])
+            encoded = _to_dense(encoded)
+            reconstructed = model.predict(encoded, verbose=0)
+            reconstruction_error = float(((encoded - reconstructed) ** 2).mean())
+
+        threshold = float(metadata.get("reconstruction_threshold", 0.0))
+        quarantine_threshold = float(metadata.get("quarantine_threshold", threshold * 2.0))
+        if threshold <= 0 or reconstruction_error <= threshold:
+            return ACTION_ALLOW, 0.0
+
+        ratio = reconstruction_error / threshold
+        if reconstruction_error >= quarantine_threshold:
+            confidence = min(0.99, 0.75 + min(ratio - 2.0, 2.0) * 0.1)
+            return ACTION_QUARANTINE, confidence
+
+        confidence = min(0.95, 0.65 + min(ratio - 1.0, 1.0) * 0.2)
+        return ACTION_BLOCK, confidence
     except Exception:
         return None
 
@@ -123,9 +170,8 @@ def _nn_action(alert: dict[str, Any]) -> tuple[str, float] | None:
 def recommend_firewall_action(alert: dict[str, Any]) -> FirewallRecommendation:
     """Recommend a firewall response for one scored alert.
 
-    This is a deterministic AI-advisor baseline. It mirrors the eventual neural
-    network contract, so a trained MLP can replace the decision block without
-    changing the backend or frontend.
+    This combines deterministic safety policy with an optional autoencoder
+    anomaly model trained on normal traffic.
     """
     severity = _text(alert.get("severity"))
     reasons = _text(alert.get("reasons"))
@@ -138,6 +184,20 @@ def recommend_firewall_action(alert: dict[str, Any]) -> FirewallRecommendation:
     port = _infer_port(protocol, action)
     predicted = _nn_action(alert)
     nn_action, nn_confidence = predicted if predicted else ("", 0.0)
+
+    if "test_site_access" in action.lower():
+        return FirewallRecommendation(
+            ai_action=ACTION_BLOCK,
+            target_type="source_ip",
+            target_value=source_ip,
+            source_ip=source_ip,
+            destination_ip=destination_ip,
+            protocol="HTTP",
+            port=port,
+            duration_minutes=10,
+            confidence=max(0.88, nn_confidence),
+            explanation="Client accessed the protected Test Site. Block this client IP from the site port.",
+        )
 
     if (nn_action == ACTION_QUARANTINE and nn_confidence >= 0.7) or (severity == "Critical" and anomaly_score >= 4.0):
         if _has_reason(reasons, "burst activity") and _has_reason(reasons, "bytes sent spike"):
@@ -180,7 +240,35 @@ def recommend_firewall_action(alert: dict[str, Any]) -> FirewallRecommendation:
             port=port,
             duration_minutes=30,
             confidence=nn_confidence,
-            explanation="Neural firewall model recommends blocking this destination.",
+            explanation="Autoencoder anomaly score recommends blocking this destination.",
+        )
+
+    if nn_action == ACTION_QUARANTINE and nn_confidence >= 0.7:
+        return FirewallRecommendation(
+            ai_action=ACTION_QUARANTINE,
+            target_type="source_ip",
+            target_value=source_ip,
+            source_ip=source_ip,
+            destination_ip=destination_ip,
+            protocol=protocol,
+            port=port,
+            duration_minutes=60,
+            confidence=nn_confidence,
+            explanation="Autoencoder reconstruction error is far above the learned normal-traffic threshold.",
+        )
+
+    if nn_action == ACTION_BLOCK and nn_confidence >= 0.7:
+        return FirewallRecommendation(
+            ai_action=ACTION_BLOCK,
+            target_type="destination_ip",
+            target_value=destination_ip,
+            source_ip=source_ip,
+            destination_ip=destination_ip,
+            protocol=protocol,
+            port=port,
+            duration_minutes=30,
+            confidence=nn_confidence,
+            explanation="Autoencoder reconstruction error exceeds the learned normal-traffic threshold.",
         )
 
     if severity == "High":

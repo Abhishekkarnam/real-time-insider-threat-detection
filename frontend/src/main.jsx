@@ -129,7 +129,7 @@ function FirewallAdvisor({ recommendations, rules, onAction }) {
         <ShieldAlert size={20} />
         <div>
           <h2>AI Firewall Advisor</h2>
-          <p>MLP-ready recommendation layer with simulated enforcement.</p>
+          <p>Autoencoder anomaly layer with real firewall enforcement.</p>
         </div>
       </div>
 
@@ -165,7 +165,7 @@ function FirewallAdvisor({ recommendations, rules, onAction }) {
         </div>
 
         <div>
-          <h3>Active Simulated Rules</h3>
+          <h3>Active Firewall Rules</h3>
           <div className="rule-list">
             {activeRules.length === 0 && <p className="empty">No active firewall rules.</p>}
             {activeRules.map((rule) => (
