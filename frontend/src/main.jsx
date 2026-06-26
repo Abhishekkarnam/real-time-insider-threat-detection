@@ -29,6 +29,7 @@ import {
 import "./styles.css";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8001";
+const REFRESH_INTERVAL_MS = 60000;
 
 async function api(path, options = {}) {
   const response = await fetch(`${API_BASE}${path}`, {
@@ -114,6 +115,7 @@ function CollectorControls({ collector, onRefresh }) {
         <span>{collector.running ? "Running" : "Stopped"}</span>
         <span>{collector.interval_seconds || 5}s interval</span>
         <span>{collector.events_per_batch || 6} events/batch</span>
+        <span>Dashboard refreshes every 1 minute</span>
       </div>
     </section>
   );
@@ -129,7 +131,7 @@ function FirewallAdvisor({ recommendations, rules, onAction }) {
         <ShieldAlert size={20} />
         <div>
           <h2>AI Firewall Advisor</h2>
-          <p>Autoencoder anomaly layer with real firewall enforcement.</p>
+          <p>Autoencoder anomaly layer with real/app-enforced firewall actions.</p>
         </div>
       </div>
 
@@ -261,13 +263,18 @@ function App() {
 
   React.useEffect(() => {
     refresh();
-    const id = window.setInterval(refresh, 5000);
+    const id = window.setInterval(refresh, REFRESH_INTERVAL_MS);
     return () => window.clearInterval(id);
   }, [refresh]);
 
   async function runFirewallAction(path, payload) {
-    await api(path, { method: "POST", body: JSON.stringify(payload) });
-    await refresh();
+    try {
+      await api(path, { method: "POST", body: JSON.stringify(payload) });
+      await refresh();
+      setError("");
+    } catch (err) {
+      setError(`Firewall action failed: ${err.message}`);
+    }
   }
 
   const severityData = summary
@@ -283,6 +290,7 @@ function App() {
         <div>
           <p className="eyebrow">AI Insider Threat Defense</p>
           <h1>Security Command Center</h1>
+          <p className="refresh-note">Auto-refreshes every 1 minute.</p>
         </div>
         <button className="secondary refresh-button" onClick={refresh}>
           <RefreshCw size={16} /> Refresh

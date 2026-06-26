@@ -92,6 +92,72 @@ def _load_nn_assets() -> tuple[Any, dict[str, Any]] | None:
     return _NN_CACHE
 
 
+def _zeek_like_row(alert: dict[str, Any], hour: int) -> dict[str, Any]:
+    port = _infer_port(_text(alert.get("protocol")), _text(alert.get("action"))) or 0
+    src_bytes = _score(alert.get("bytes_sent"))
+    dst_bytes = _score(alert.get("bytes_received"))
+    total_bytes = src_bytes + dst_bytes
+    src_pkts = max(1.0, src_bytes / 1000.0)
+    dst_pkts = max(1.0, dst_bytes / 1000.0)
+    total_pkts = src_pkts + dst_pkts
+    protocol = _text(alert.get("protocol")).lower() or "tcp"
+    return {
+        "src_ip": _text(alert.get("source_ip")),
+        "dst_ip": _text(alert.get("destination_ip")),
+        "proto": "tcp" if protocol == "http" else protocol,
+        "service": protocol,
+        "conn_state": "SF",
+        "http_method": "GET" if "test_site_access" in _text(alert.get("action")).lower() else "",
+        "ssl_version": "",
+        "ssl_cipher": "",
+        "http_version": "1.1" if protocol == "http" else "",
+        "http_orig_mime_types": "",
+        "http_resp_mime_types": "",
+        "weird_notice": "",
+        "src_port": 0,
+        "dst_port": port,
+        "duration": 0.0,
+        "src_bytes": src_bytes,
+        "dst_bytes": dst_bytes,
+        "missed_bytes": 0,
+        "src_pkts": src_pkts,
+        "dst_pkts": dst_pkts,
+        "src_ip_bytes": src_bytes,
+        "dst_ip_bytes": dst_bytes,
+        "dns_qclass": 0,
+        "dns_qtype": 0,
+        "dns_rcode": 0,
+        "http_trans_depth": 1 if protocol == "http" else 0,
+        "http_request_body_len": 0,
+        "http_response_body_len": dst_bytes,
+        "http_status_code": 200,
+        "total_bytes": total_bytes,
+        "total_pkts": total_pkts,
+        "byte_ratio": src_bytes / (dst_bytes + 1.0),
+        "pkt_ratio": src_pkts / (dst_pkts + 1.0),
+        "bytes_per_packet": total_bytes / (total_pkts + 1.0),
+        "dns_query_length": 0,
+        "http_uri_length": 1 if protocol == "http" else 0,
+        "user_agent_length": 0,
+        "dns_AA": 0,
+        "dns_RD": 0,
+        "dns_RA": 0,
+        "dns_rejected": 0,
+        "ssl_resumed": 0,
+        "ssl_established": 0,
+        "has_dns_query": 0,
+        "has_ssl_subject": 0,
+        "has_ssl_issuer": 0,
+        "has_http_uri": 1 if protocol == "http" else 0,
+        "has_user_agent": 0,
+        "has_weird_name": 0,
+        "has_weird_addl": 0,
+        "is_common_dst_port": int(port in {22, 53, 80, 443, 8080}),
+        "is_privileged_dst_port": int(0 < port < 1024),
+        "hour": hour,
+    }
+
+
 def _nn_action(alert: dict[str, Any]) -> tuple[str, float] | None:
     assets = _load_nn_assets()
     if assets is None:
@@ -104,28 +170,31 @@ def _nn_action(alert: dict[str, Any]) -> tuple[str, float] | None:
         reasons = _text(alert.get("reasons"))
         timestamp = pd.to_datetime(_text(alert.get("timestamp")), errors="coerce")
         hour = int(timestamp.hour) if not pd.isna(timestamp) else 0
-        row = pd.DataFrame(
-            [
-                {
-                    "user_id": _text(alert.get("user_id")),
-                    "source_ip": _text(alert.get("source_ip")),
-                    "destination_ip": _text(alert.get("destination_ip")),
-                    "protocol": _text(alert.get("protocol")),
-                    "action": _text(alert.get("action")),
-                    "severity": _text(alert.get("severity")),
-                    "hour": hour,
-                    "bytes_sent": _score(alert.get("bytes_sent")),
-                    "bytes_received": _score(alert.get("bytes_received")),
-                    "score": _score(alert.get("score")),
-                    "has_unusual_hour": int(_has_reason(reasons, "unusual access hour")),
-                    "has_new_source_ip": int(_has_reason(reasons, "new source ip")),
-                    "has_new_destination_ip": int(_has_reason(reasons, "new destination ip")),
-                    "has_bytes_spike": int(_has_reason(reasons, "bytes sent spike")),
-                    "has_burst_activity": int(_has_reason(reasons, "burst activity")),
-                }
-            ]
-        )
-        if metadata.get("model_type") == "embedding_autoencoder":
+        if metadata.get("model_type") == "zeek_embedding_autoencoder":
+            row = pd.DataFrame([_zeek_like_row(alert, hour)])
+        else:
+            row = pd.DataFrame(
+                [
+                    {
+                        "user_id": _text(alert.get("user_id")),
+                        "source_ip": _text(alert.get("source_ip")),
+                        "destination_ip": _text(alert.get("destination_ip")),
+                        "protocol": _text(alert.get("protocol")),
+                        "action": _text(alert.get("action")),
+                        "severity": _text(alert.get("severity")),
+                        "hour": hour,
+                        "bytes_sent": _score(alert.get("bytes_sent")),
+                        "bytes_received": _score(alert.get("bytes_received")),
+                        "score": _score(alert.get("score")),
+                        "has_unusual_hour": int(_has_reason(reasons, "unusual access hour")),
+                        "has_new_source_ip": int(_has_reason(reasons, "new source ip")),
+                        "has_new_destination_ip": int(_has_reason(reasons, "new destination ip")),
+                        "has_bytes_spike": int(_has_reason(reasons, "bytes sent spike")),
+                        "has_burst_activity": int(_has_reason(reasons, "burst activity")),
+                    }
+                ]
+            )
+        if metadata.get("model_type") in {"embedding_autoencoder", "zeek_embedding_autoencoder"}:
             embedded_features = metadata["embedded_features"]
             small_categorical_features = metadata["small_categorical_features"]
             numeric_features = metadata["numeric_features"]
@@ -137,7 +206,7 @@ def _nn_action(alert: dict[str, Any]) -> tuple[str, float] | None:
             for feature in embedded_features:
                 vocab = metadata["vocabularies"][feature]
                 max_index = max(int(metadata["max_index_values"][feature]), 1)
-                index = int(vocab.get(_text(alert.get(feature)), 0))
+                index = int(vocab.get(_text(row.iloc[0].get(feature)), 0))
                 model_inputs[f"{feature}_input"] = np.asarray([index], dtype=np.int32)
                 normalized_indices.append(np.asarray([[index / max_index]], dtype=np.float32))
 
@@ -184,8 +253,25 @@ def recommend_firewall_action(alert: dict[str, Any]) -> FirewallRecommendation:
     port = _infer_port(protocol, action)
     predicted = _nn_action(alert)
     nn_action, nn_confidence = predicted if predicted else ("", 0.0)
+    timestamp = _text(alert.get("timestamp"))
+    hour_match = re.search(r"T(\d{2}):", timestamp)
+    event_hour = int(hour_match.group(1)) if hour_match else -1
+    is_business_hours = 8 <= event_hour < 17
 
     if "test_site_access" in action.lower():
+        if is_business_hours:
+            return FirewallRecommendation(
+                ai_action=ACTION_MONITOR,
+                target_type="source_ip",
+                target_value=source_ip,
+                source_ip=source_ip,
+                destination_ip=destination_ip,
+                protocol="HTTP",
+                port=port,
+                duration_minutes=15,
+                confidence=0.68,
+                explanation="Client accessed the protected Test Site during the normal 8 AM to 5 PM access window. Monitor this client.",
+            )
         return FirewallRecommendation(
             ai_action=ACTION_BLOCK,
             target_type="source_ip",
@@ -195,8 +281,8 @@ def recommend_firewall_action(alert: dict[str, Any]) -> FirewallRecommendation:
             protocol="HTTP",
             port=port,
             duration_minutes=10,
-            confidence=max(0.88, nn_confidence),
-            explanation="Client accessed the protected Test Site. Block this client IP from the site port.",
+            confidence=max(0.95, nn_confidence),
+            explanation="Client accessed the protected Test Site outside the normal 8 AM to 5 PM window. Block this client IP from the site port.",
         )
 
     if (nn_action == ACTION_QUARANTINE and nn_confidence >= 0.7) or (severity == "Critical" and anomaly_score >= 4.0):

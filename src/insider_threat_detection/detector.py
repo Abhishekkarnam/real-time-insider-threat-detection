@@ -9,6 +9,11 @@ class BehaviorProfiler:
     def score_event(self, event: NetworkEvent, profile: UserProfile) -> DetectionResult:
         reasons: list[str] = []
         score = 0.0
+        action = event.action.lower()
+
+        if "test_site_access" in action and not (8 <= event.timestamp.hour < 17):
+            score += 2.5
+            reasons.append("test site access outside business hours")
 
         if profile.event_count >= self.config.warmup_events:
             hour_gap = abs(event.timestamp.hour - profile.average_hour)

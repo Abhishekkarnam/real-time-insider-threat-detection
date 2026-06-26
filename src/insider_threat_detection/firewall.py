@@ -227,6 +227,7 @@ def apply_simulated_rule(rules_path: Path, recommendation: dict[str, str]) -> di
 def apply_rule(rules_path: Path, recommendation: dict[str, str]) -> dict[str, str]:
     rules = list_rules(rules_path)
     applied = apply_real_firewall_rule(recommendation)
+    mode = "real" if applied else "app_enforced"
     rule = {
         "id": uuid.uuid4().hex[:12],
         "recommendation_id": recommendation["id"],
@@ -240,8 +241,8 @@ def apply_rule(rules_path: Path, recommendation: dict[str, str]) -> dict[str, st
         "target_value": recommendation["target_value"],
         "duration_minutes": recommendation["duration_minutes"],
         "reason": recommendation["explanation"],
-        "mode": "real" if applied else "real_failed",
-        "status": "active" if applied else "failed",
+        "mode": mode,
+        "status": "active",
     }
     rules.append(rule)
     _write_csv(rules_path, RULE_FIELDS, rules)
