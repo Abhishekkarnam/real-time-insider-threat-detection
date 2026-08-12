@@ -28,7 +28,7 @@ import {
 } from "recharts";
 import "./styles.css";
 
-const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8001";
+const API_BASE = import.meta.env.VITE_API_BASE || "http://100.78.66.73:8001";
 const REFRESH_INTERVAL_MS = 60000;
 
 async function api(path, options = {}) {
@@ -65,13 +65,16 @@ function MetricCard({ icon: Icon, label, value, detail }) {
   );
 }
 
-function CollectorControls({ collector, onRefresh }) {
+function CollectorControls({ collector, onRefresh, onCollectorUpdate }) {
   const [busy, setBusy] = React.useState(false);
 
   async function runAction(path, body) {
     setBusy(true);
     try {
-      await api(path, body ? { method: "POST", body: JSON.stringify(body) } : { method: "POST" });
+      const result = await api(path, body ? { method: "POST", body: JSON.stringify(body) } : { method: "POST" });
+      if (typeof result.running === "boolean") {
+        onCollectorUpdate(result);
+      }
       await onRefresh();
     } finally {
       setBusy(false);
@@ -84,7 +87,7 @@ function CollectorControls({ collector, onRefresh }) {
         <RadioTower size={20} />
         <div>
           <h2>Collector</h2>
-          <p>{collector.running ? "Live simulation is streaming event batches." : "Collector is paused."}</p>
+          <p>{collector.running ? "Live client log collection is active." : "Live client log collection is paused."}</p>
         </div>
       </div>
       <div className="control-row">
@@ -105,16 +108,16 @@ function CollectorControls({ collector, onRefresh }) {
         <button
           className="secondary"
           disabled={busy}
-          onClick={() => runAction("/api/simulate/live", { interval_seconds: 5, events_per_batch: 8 })}
+          onClick={onRefresh}
         >
-          <RefreshCw size={16} /> Append Batch
+          <RefreshCw size={16} /> Refresh Live
         </button>
       </div>
       <div className="collector-state">
         <span className={collector.running ? "dot online" : "dot"} />
         <span>{collector.running ? "Running" : "Stopped"}</span>
         <span>{collector.interval_seconds || 5}s interval</span>
-        <span>{collector.events_per_batch || 6} events/batch</span>
+        <span>client logger data only</span>
         <span>Dashboard refreshes every 1 minute</span>
       </div>
     </section>
@@ -307,7 +310,7 @@ function App() {
       </section>
 
       <div className="main-grid">
-        <CollectorControls collector={collector} onRefresh={refresh} />
+      <CollectorControls collector={collector} onRefresh={refresh} onCollectorUpdate={setCollector} />
         <section className="panel chart-panel">
           <h2>Alert Severity</h2>
           <ResponsiveContainer width="100%" height={220}>

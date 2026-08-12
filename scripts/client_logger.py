@@ -3,15 +3,18 @@
 Run this on each client PC that accesses the server PC's Test Site.
 
 Example:
-    python scripts/client_logger.py --server-api http://SERVER_IP:8001/api/events --test-site-host SERVER_IP --test-site-port 8080 --client-id client1
+    python scripts/client_logger.py --server-api http://SERVER_TAILSCALE_IP:8001/api/events --test-site-host SERVER_TAILSCALE_IP --test-site-port 8080 --client-id client1
 
 Optional traffic probe for demos:
-    python scripts/client_logger.py --server-api http://SERVER_IP:8001/api/events --test-site-host SERVER_IP --test-site-port 8080 --client-id client1 --probe-test-site
+    python scripts/client_logger.py --server-api http://SERVER_TAILSCALE_IP:8001/api/events --test-site-host SERVER_TAILSCALE_IP --test-site-port 8080 --client-id client1 --probe-test-site
 
 Notes:
     - Install psutil for better connection visibility: python -m pip install psutil
     - Run PowerShell as Administrator on Windows for complete connection data.
     - The timestamp is generated on the client PC before upload.
+    - For Tailscale demos, set TAILSCALE_SERVER_IP once and omit the URL flags:
+      set TAILSCALE_SERVER_IP=100.x.x.x
+      python scripts/client_logger.py --client-id client1 --probe-test-site
 """
 
 from __future__ import annotations
@@ -19,6 +22,7 @@ from __future__ import annotations
 import argparse
 import getpass
 import json
+import os
 import socket
 import time
 from datetime import datetime
@@ -150,13 +154,28 @@ def collect_matching_connections(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Send client PC test-site access logs to the AI firewall backend.")
-    parser.add_argument("--server-api", required=True, help="Backend endpoint, for example http://SERVER_IP:8001/api/events")
-    parser.add_argument("--test-site-host", required=True, help="Server PC IP/hostname that hosts the Test Site")
+    default_tailnet_host = os.getenv("TAILSCALE_SERVER_IP") or os.getenv("AI_FIREWALL_SERVER_IP")
+    default_server_api = os.getenv("AI_FIREWALL_API")
+    if not default_server_api and default_tailnet_host:
+        default_server_api = f"http://{default_tailnet_host}:8001/api/events"
+
+    parser.add_argument(
+        "--server-api",
+        default=default_server_api,
+        help="Backend endpoint, for example http://SERVER_TAILSCALE_IP:8001/api/events",
+    )
+    parser.add_argument(
+        "--test-site-host",
+        default=os.getenv("TEST_SITE_HOST") or default_tailnet_host,
+        help="Server PC Tailscale IP/hostname that hosts the Test Site",
+    )
     parser.add_argument("--test-site-port", type=int, default=8080, help="Test Site HTTP port")
     parser.add_argument("--client-id", default=socket.gethostname(), help="Client label shown in the dashboard")
     parser.add_argument("--interval", type=int, default=3, help="Polling interval in seconds")
     parser.add_argument("--probe-test-site", action="store_true", help="Generate a small HTTP request each interval")
     args = parser.parse_args()
+    if not args.server_api or not args.test_site_host:
+        parser.error("set TAILSCALE_SERVER_IP or pass both --server-api and --test-site-host")
 
     seen_connections: set[tuple[Any, ...]] = set()
     print("Client logger started. Press Ctrl+C to stop.")

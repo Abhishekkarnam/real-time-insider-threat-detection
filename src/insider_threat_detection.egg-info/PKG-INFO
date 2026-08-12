@@ -140,6 +140,34 @@ This starter is designed to help you begin immediately, then improve the system 
 This copy now includes a FastAPI + React web application with an AI firewall
 advisor.
 
+## Tailscale VPN Demo
+
+This project copy is ready for a VPN-based demonstration using Tailscale. Use
+Tailscale as the private network between the server PC and both Windows client
+PCs. The AI detection and firewall decision logic still runs inside this
+project.
+
+Prepare the project on the server PC after Tailscale login:
+
+```powershell
+cd "C:\SEM 6\Network Security\AI With Firewall VPN Trail"
+.venv\Scripts\Activate.ps1
+py scripts\tailscale_config.py
+```
+
+If the Tailscale IP is not detected automatically:
+
+```powershell
+py scripts\tailscale_config.py --server-ip 100.x.x.x
+```
+
+Then use the generated `100.x.x.x` address for the backend, dashboard, test
+site, and client logger. Full VPN setup instructions are in:
+
+```text
+TAILSCALE_SETUP.md
+```
+
 ### Backend
 
 ```powershell
@@ -213,19 +241,21 @@ python scripts/serve_test_site.py --host 0.0.0.0 --port 8080
 Client PCs should open:
 
 ```text
-http://SERVER_IP:8080
+http://SERVER_TAILSCALE_IP:8080
 ```
 
 Then run the client logger on each client PC:
 
 ```powershell
-python scripts/client_logger.py --server-api http://SERVER_IP:8001/api/events --test-site-host SERVER_IP --test-site-port 8080 --client-id client1
+set TAILSCALE_SERVER_IP=100.x.x.x
+python scripts/client_logger.py --client-id client1
 ```
 
 For a controlled demo that generates traffic automatically:
 
 ```powershell
-python scripts/client_logger.py --server-api http://SERVER_IP:8001/api/events --test-site-host SERVER_IP --test-site-port 8080 --client-id client1 --probe-test-site
+set TAILSCALE_SERVER_IP=100.x.x.x
+python scripts/client_logger.py --client-id client1 --probe-test-site
 ```
 
 When the AI Firewall Advisor recommendation is approved, the backend creates a
