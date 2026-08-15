@@ -374,7 +374,12 @@ def train(csv_path: Path, model_path: Path, preprocessor_path: Path) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Train the autoencoder firewall anomaly model.")
-    parser.add_argument("--csv-path", type=Path, default=Path("data") / "network_events.csv")
+    parser.add_argument(
+        "--csv-path",
+        type=Path,
+        default=PROJECT_ROOT / "train_test_network.csv",
+        help="Training CSV path. Defaults to the Zeek-style train_test_network.csv in the project root.",
+    )
     parser.add_argument("--model-path", type=Path, default=Path("models") / "firewall_nn.keras")
     parser.add_argument("--preprocessor-path", type=Path, default=Path("models") / "firewall_preprocessor.pkl")
     args = parser.parse_args()

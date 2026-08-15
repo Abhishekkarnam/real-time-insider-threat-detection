@@ -279,6 +279,31 @@ h3 {
   margin-bottom: 10px;
 }
 
+.status {
+  background: #edf0f5;
+  border-radius: 999px;
+  color: #344054;
+  display: inline-flex;
+  font-size: 0.75rem;
+  font-weight: 800;
+  padding: 0.22rem 0.55rem;
+}
+
+.status.auto_applied {
+  background: #fee4e2;
+  color: #912018;
+}
+
+.auto-note {
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  border-radius: 7px;
+  color: #9a3412;
+  font-size: 0.86rem;
+  margin: 0;
+  padding: 9px 10px;
+}
+
 .approve {
   background: #e7f8f1;
   color: #0f6b4b;

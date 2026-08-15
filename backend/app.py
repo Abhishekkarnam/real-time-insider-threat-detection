@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import sys
 import threading
 import time
@@ -20,28 +21,21 @@ if str(SRC_PATH) not in sys.path:
 
 from insider_threat_detection.ai_firewall_advisor import recommend_firewall_action
 from insider_threat_detection.firewall import (
-    approve_recommendation,
+    apply_rule,
     deactivate_rule,
     execute_firewall_unblock,
-    list_recommendations,
     list_rules,
     make_event_key,
-    reject_recommendation,
     RULE_FIELDS,
-    upsert_recommendations,
     _write_csv,
 )
 from insider_threat_detection.pipeline import analyze_events
 from insider_threat_detection.simulator import (
     FIELDNAMES,
-    append_live_events_csv,
-    append_sample_events_csv,
-    generate_sample_events_csv,
 )
 
 
-DATA_PATH = PROJECT_ROOT / "data" / "network_events.csv"
-RECOMMENDATIONS_PATH = PROJECT_ROOT / "data" / "firewall_recommendations.csv"
+DATA_PATH = PROJECT_ROOT / "data" / "real_time_stored_data.csv"
 RULES_PATH = PROJECT_ROOT / "data" / "firewall_rules.csv"
 
 collector_thread: threading.Thread | None = None
@@ -90,17 +84,18 @@ app.add_middleware(
 
 
 def ensure_data_file() -> None:
-    if not DATA_PATH.exists() or DATA_PATH.stat().st_size == 0:
-        generate_sample_events_csv(DATA_PATH, user_count=6, events_per_user=80)
+    DATA_PATH.parent.mkdir(parents=True, exist_ok=True)
+    if DATA_PATH.exists() and DATA_PATH.stat().st_size > 0:
+        return
+    with DATA_PATH.open("w", newline="", encoding="utf-8") as file:
+        writer = csv.DictWriter(file, fieldnames=FIELDNAMES)
+        writer.writeheader()
 
 
 def append_events(rows: list[dict[str, Any]]) -> int:
-    DATA_PATH.parent.mkdir(parents=True, exist_ok=True)
-    file_exists = DATA_PATH.exists() and DATA_PATH.stat().st_size > 0
+    ensure_data_file()
     with DATA_PATH.open("a", newline="", encoding="utf-8") as file:
         writer = csv.DictWriter(file, fieldnames=FIELDNAMES)
-        if not file_exists:
-            writer.writeheader()
         accepted = 0
         for row in rows:
             if all(row.get(field) not in (None, "") for field in FIELDNAMES):
@@ -115,36 +110,96 @@ def dashboard_data() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     return scored_events, alerts
 
 
+def _recommendation_id(event_key: str) -> str:
+    return hashlib.sha1(event_key.encode("utf-8")).hexdigest()[:12]
+
+
+def _rule_matches_recommendation(rule: dict[str, str], recommendation: dict[str, Any]) -> bool:
+    if rule.get("status") != "active":
+        return False
+    return (
+        str(rule.get("source_ip", "")) == str(recommendation.get("source_ip", ""))
+        and str(rule.get("destination_ip", "")) == str(recommendation.get("destination_ip", ""))
+        and str(rule.get("port", "")) == str(recommendation.get("port", ""))
+        and str(rule.get("action", "")) == str(recommendation.get("ai_action", ""))
+    )
+
+
+def _has_active_rule_for_recommendation(recommendation: dict[str, Any]) -> bool:
+    return any(_rule_matches_recommendation(rule, recommendation) for rule in list_rules(RULES_PATH))
+
+
+def _should_auto_apply(recommendation: dict[str, Any]) -> bool:
+    """Allow the AI to enforce only strong block/quarantine decisions."""
+    action = str(recommendation.get("ai_action", "")).lower()
+    if action not in {"block", "quarantine"}:
+        return False
+
+    try:
+        confidence = float(recommendation.get("confidence") or 0.0)
+        score = float(recommendation.get("score") or 0.0)
+    except (TypeError, ValueError):
+        confidence = 0.0
+        score = 0.0
+
+    severity = str(recommendation.get("severity", ""))
+    is_test_site_decision = "test site" in str(recommendation.get("explanation", "")).lower()
+
+    return (
+        action == "quarantine"
+        or confidence >= 0.90
+        or severity == "Critical"
+        or score >= 4.0
+        or (is_test_site_decision and confidence >= 0.90)
+    )
+
+
+def _auto_apply_recommendation(recommendation: dict[str, Any]) -> str:
+    if not _should_auto_apply(recommendation):
+        return "pending"
+    if _has_active_rule_for_recommendation(recommendation):
+        return "auto_applied"
+    apply_rule(RULES_PATH, {key: str(value) for key, value in recommendation.items()})
+    return "auto_applied"
+
+
 def sync_firewall_recommendations() -> list[dict[str, str]]:
+    """Build live recommendations and auto-enforce strong AI firewall actions.
+
+    Recommendations are intentionally not persisted to firewall_recommendations.csv.
+    The dashboard should reflect live data from real_time_stored_data.csv only.
+    """
     scored_events, _ = dashboard_data()
     new_recommendations: list[dict[str, Any]] = []
     for event in scored_events:
         is_test_site_access = "test_site_access" in str(event.get("action", "")).lower()
         if not event.get("alert") and not is_test_site_access:
             continue
+        event_key = make_event_key(event)
         recommendation = recommend_firewall_action(event)
-        new_recommendations.append(
-            {
-                "event_key": make_event_key(event),
-                "timestamp": event["timestamp"],
-                "user_id": event["user_id"],
-                "source_ip": event["source_ip"],
-                "destination_ip": event["destination_ip"],
-                "protocol": event["protocol"],
-                "port": recommendation.port or "",
-                "severity": event["severity"],
-                "score": event["score"],
-                "reasons": event["reasons"],
-                "ai_action": recommendation.ai_action,
-                "target_type": recommendation.target_type,
-                "target_value": recommendation.target_value,
-                "duration_minutes": recommendation.duration_minutes,
-                "confidence": recommendation.confidence,
-                "explanation": recommendation.explanation,
-                "status": "pending",
-            }
-        )
-    return upsert_recommendations(RECOMMENDATIONS_PATH, new_recommendations)
+        row = {
+            "id": _recommendation_id(event_key),
+            "event_key": event_key,
+            "timestamp": event["timestamp"],
+            "user_id": event["user_id"],
+            "source_ip": event["source_ip"],
+            "destination_ip": event["destination_ip"],
+            "protocol": event["protocol"],
+            "port": recommendation.port or "",
+            "severity": event["severity"],
+            "score": event["score"],
+            "reasons": event["reasons"],
+            "ai_action": recommendation.ai_action,
+            "target_type": recommendation.target_type,
+            "target_value": recommendation.target_value,
+            "duration_minutes": recommendation.duration_minutes,
+            "confidence": recommendation.confidence,
+            "explanation": recommendation.explanation,
+            "status": "pending",
+        }
+        row["status"] = _auto_apply_recommendation(row)
+        new_recommendations.append(row)
+    return [{key: str(value) for key, value in row.items()} for row in new_recommendations]
 
 
 def build_summary(events: list[dict[str, Any]], alerts: list[dict[str, Any]]) -> dict[str, Any]:
@@ -204,7 +259,6 @@ def build_summary(events: list[dict[str, Any]], alerts: list[dict[str, Any]]) ->
 def collector_loop(stop_event: threading.Event, interval_seconds: int, events_per_batch: int) -> None:
     ensure_data_file()
     while not stop_event.is_set():
-        append_live_events_csv(DATA_PATH, user_count=6, events_to_add=events_per_batch)
         sync_firewall_recommendations()
         stop_event.wait(interval_seconds)
 
@@ -299,17 +353,15 @@ def summary() -> dict[str, Any]:
 @app.post("/api/simulate/live")
 def simulate_live(payload: CollectorStartPayload) -> dict[str, str]:
     ensure_data_file()
-    append_live_events_csv(DATA_PATH, user_count=6, events_to_add=payload.events_per_batch)
     sync_firewall_recommendations()
-    return {"status": "appended"}
+    return {"status": "live_only", "message": "Synthetic appends are disabled. Dashboard uses client-posted live data only."}
 
 
 @app.post("/api/simulate/sample")
 def simulate_sample() -> dict[str, str]:
     ensure_data_file()
-    append_sample_events_csv(DATA_PATH, user_count=6, events_per_user=80)
     sync_firewall_recommendations()
-    return {"status": "appended"}
+    return {"status": "live_only", "message": "Sample appends are disabled. Dashboard uses client-posted live data only."}
 
 
 @app.get("/api/firewall/recommendations")
@@ -325,18 +377,28 @@ def firewall_rules() -> dict[str, Any]:
 
 @app.post("/api/firewall/approve")
 def approve_firewall(payload: RecommendationActionPayload) -> dict[str, Any]:
-    result = approve_recommendation(RECOMMENDATIONS_PATH, RULES_PATH, payload.recommendation_id)
-    if result is None:
-        raise HTTPException(status_code=404, detail="Recommendation not found")
-    return {"result": result}
+    recommendation = next(
+        (row for row in sync_firewall_recommendations() if row["id"] == payload.recommendation_id),
+        None,
+    )
+    if recommendation is None:
+        raise HTTPException(status_code=404, detail="Live recommendation not found")
+    recommendation["status"] = "approved"
+    if recommendation["ai_action"] in {"block", "quarantine"}:
+        return {"result": apply_rule(RULES_PATH, recommendation)}
+    return {"result": recommendation}
 
 
 @app.post("/api/firewall/reject")
 def reject_firewall(payload: RecommendationActionPayload) -> dict[str, Any]:
-    result = reject_recommendation(RECOMMENDATIONS_PATH, payload.recommendation_id)
-    if result is None:
-        raise HTTPException(status_code=404, detail="Recommendation not found")
-    return {"result": result}
+    recommendation = next(
+        (row for row in sync_firewall_recommendations() if row["id"] == payload.recommendation_id),
+        None,
+    )
+    if recommendation is None:
+        raise HTTPException(status_code=404, detail="Live recommendation not found")
+    recommendation["status"] = "rejected"
+    return {"result": recommendation}
 
 
 @app.post("/api/firewall/unblock")
@@ -362,7 +424,7 @@ def start_collector(payload: CollectorStartPayload) -> dict[str, Any]:
         target=collector_loop,
         args=(collector_stop_event, payload.interval_seconds, payload.events_per_batch),
         daemon=True,
-        name="simulated-insider-threat-collector",
+        name="live-client-log-collector",
     )
     collector_thread.start()
     return {"running": True, **collector_config}
@@ -370,15 +432,20 @@ def start_collector(payload: CollectorStartPayload) -> dict[str, Any]:
 
 @app.post("/api/collector/stop")
 def stop_collector() -> dict[str, Any]:
-    global collector_stop_event
+    global collector_stop_event, collector_thread
     if collector_stop_event is not None:
         collector_stop_event.set()
-    return {"running": False}
+    if collector_thread is not None:
+        collector_thread.join(timeout=2)
+        if not collector_thread.is_alive():
+            collector_thread = None
+    return {"running": False, **collector_config}
 
 
 @app.get("/api/collector/status")
 def collector_status() -> dict[str, Any]:
+    stop_requested = collector_stop_event is not None and collector_stop_event.is_set()
     return {
-        "running": collector_thread is not None and collector_thread.is_alive(),
+        "running": collector_thread is not None and collector_thread.is_alive() and not stop_requested,
         **collector_config,
     }
