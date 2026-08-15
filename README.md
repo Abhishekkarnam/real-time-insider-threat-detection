@@ -1,155 +1,290 @@
-# Real-Time Insider Threat Detection Using Network Behavior Profiling
+```markdown
+# AI With Firewall
 
-This repository is a starter implementation for a course project focused on detecting insider threats by modeling user network behavior over time and flagging deviations in real time.
+Real-time insider threat detection system with live client log collection, Autoencoder-based anomaly detection, autonomous AI firewall enforcement, and a React security dashboard.
 
-## Project Idea
+## Overview
 
-Insider threats are difficult to detect because the attacker is often a legitimate user. Instead of relying only on signatures or blacklists, this project builds a behavior profile for each user and raises alerts when activity becomes unusual.
+This project detects suspicious insider activity by collecting live network access logs from client PCs, scoring behavior, and applying firewall actions when high-risk activity is detected.
 
-Examples of suspicious behavior include:
+The system supports:
 
-- Logging in at unusual hours
-- Connecting to rarely used destinations
-- Sudden spikes in upload volume
-- Abnormal access frequency
-- New device or source IP changes
+- Live client log collection
+- FastAPI backend
+- React dashboard
+- Autoencoder Neural Network anomaly detection
+- AI Firewall Advisor
+- Autonomous block/quarantine enforcement
+- Application-level protected test-site blocking
+- Real Windows Firewall / Linux UFW rule attempt
+- Automatic firewall rule expiration
 
-## Starter Scope
-
-This starter version includes:
-
-- A clean Python project structure
-- Synthetic event generation for normal and suspicious traffic
-- Real-time per-user behavior profiling
-- A simple anomaly scoring engine
-- Alert generation for high-risk events
-- A Streamlit dashboard for alerts and graphs
-
-## Suggested Final Project Flow
-
-1. Collect or simulate network events
-2. Build per-user normal behavior profiles
-3. Extract real-time features from each event
-4. Score anomalies using behavioral deviation
-5. Raise alerts with reasons
-6. Evaluate precision, recall, and false positives
-
-## Repository Structure
+## Architecture
 
 ```text
-.
-|-- README.md
-|-- requirements.txt
-|-- docs/
-|   `-- project-plan.md
-|-- scripts/
-|   `-- generate_sample_data.py
-`-- src/
-    `-- insider_threat_detection/
-        |-- __init__.py
-        |-- config.py
-        |-- detector.py
-        |-- models.py
-        |-- pipeline.py
-        `-- simulator.py
+Client PC
+  ↓
+client_logger.py
+  ↓
+FastAPI Backend
+  ↓
+data/real_time_stored_data.csv
+  ↓
+Detection Pipeline + Autoencoder NN
+  ↓
+AI Firewall Advisor
+  ↓
+Autonomous Firewall Rule Creation
+  ↓
+data/firewall_rules.csv
+  ↓
+Protected Test Site / OS Firewall
 ```
 
-## Quick Start
+## Main Components
 
-1. Create a virtual environment
-2. Install requirements
-3. Generate sample data
-4. Run the pipeline
+```text
+backend/app.py
+FastAPI backend, live API endpoints, collector control, autonomous firewall enforcement, rule expiration.
+
+frontend/
+React dashboard for events, alerts, AI decisions, active firewall rules, and unblock actions.
+
+scripts/client_logger.py
+Runs on client PCs and sends real access logs to the backend.
+
+scripts/serve_test_site.py
+Runs the protected test website and blocks clients listed in firewall_rules.csv.
+
+src/insider_threat_detection/train_firewall_nn.py
+Trains the Autoencoder Neural Network.
+
+src/insider_threat_detection/ai_firewall_advisor.py
+Uses rule logic and NN reconstruction error to recommend allow, monitor, block, or quarantine.
+
+src/insider_threat_detection/firewall.py
+Applies real/app-enforced firewall rules and manages rule storage.
+```
+
+## Dataset
+
+Default training dataset:
+
+```text
+train_test_network.csv
+```
+
+Train the model:
 
 ```powershell
-python -m venv .venv
+cd "C:\SEM 6\Network Security\AI With Firewall"
 .venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
-python scripts/generate_sample_data.py
-python run_demo.py
+py -m pip install -r requirements.txt
+py -m pip install -e .
+py -m insider_threat_detection.train_firewall_nn
 ```
 
-## Dashboard
+Model outputs:
 
-Launch the Streamlit dashboard with:
+```text
+models/firewall_nn.keras
+models/firewall_preprocessor.pkl
+```
+
+## Run Backend
 
 ```powershell
-streamlit run dashboard.py
+cd "C:\SEM 6\Network Security\AI With Firewall"
+.venv\Scripts\Activate.ps1
+py -m uvicorn backend.app:app --host 0.0.0.0 --port 8001
 ```
+
+Health check:
+
+```powershell
+curl http://127.0.0.1:8001/api/health
+```
+
+Expected:
+
+```json
+{"status":"ok"}
+```
+
+## Run Protected Test Site
+
+```powershell
+cd "C:\SEM 6\Network Security\AI With Firewall"
+.venv\Scripts\Activate.ps1
+py scripts\serve_test_site.py --host 0.0.0.0 --port 8080
+```
+
+Open on server:
+
+```text
+http://localhost:8080
+```
+
+Open from clients:
+
+```text
+http://SERVER_IP:8080
+```
+
+## Run Frontend Dashboard
+
+```powershell
+cd "C:\SEM 6\Network Security\AI With Firewall\frontend"
+$env:VITE_API_BASE="http://127.0.0.1:8001"
+npm install
+npm run dev -- --host 0.0.0.0 --port 5173
+```
+
+Open:
+
+```text
+http://localhost:5173
+```
+
+If opening from another PC on the same network:
+
+```text
+http://SERVER_IP:5173
+```
+
+Then start frontend with:
+
+```powershell
+$env:VITE_API_BASE="http://SERVER_IP:8001"
+npm run dev -- --host 0.0.0.0 --port 5173
+```
+
+## Run Client Logger
+
+On Client 1:
+
+```cmd
+cd /d "C:\SEM 6\Network Security\AI With Firewall"
+py scripts\client_logger.py --server-api http://SERVER_IP:8001/api/events --test-site-host SERVER_IP --test-site-port 8080 --client-id client1 --probe-test-site
+```
+
+On Client 2:
+
+```cmd
+cd /d "C:\SEM 6\Network Security\AI With Firewall"
+py scripts\client_logger.py --server-api http://SERVER_IP:8001/api/events --test-site-host SERVER_IP --test-site-port 8080 --client-id client2 --probe-test-site
+```
+
+Replace:
+
+```text
+SERVER_IP
+```
+
+with the server PC IP address.
+
+Example:
+
+```text
+192.168.20.86
+```
+
+## Autonomous AI Firewall Enforcement
+
+The backend automatically applies strong AI decisions.
+
+Auto-enforcement happens when:
+
+```text
+action = quarantine
+or confidence >= 0.90
+or severity = Critical
+or anomaly score >= 4.0
+or test-site block confidence >= 0.90
+```
+
+Flow:
+
+```text
+Client event received
+↓
+Detector + NN analyzes behavior
+↓
+AI Firewall Advisor recommends block/quarantine
+↓
+Backend automatically calls apply_rule()
+↓
+firewall_rules.csv is created/updated
+↓
+Test site blocks the client
+```
+
+No dashboard approval is required for high-confidence block/quarantine actions.
+
+Lower-risk decisions remain pending and can still be reviewed manually.
+
+## Firewall Rule File
+
+Created automatically after the first block/quarantine:
+
+```text
+data/firewall_rules.csv
+```
+
+The protected test site reads this file and returns HTTP 403 to blocked clients.
+
+## Dashboard Behavior
 
 The dashboard shows:
 
-- Total processed events and alert rate
-- Severity overview with Low, Medium, High, and Critical alert levels
-- Alert timeline
-- Alert counts by user
-- Traffic volume over time
-- Average anomaly score by hour
-- Common alert reasons
-- Recent alerts and the full scored event stream
-- Downloadable CSV export for alerts and scored events
+- Events processed
+- Alerts raised
+- Critical alerts
+- Average risk score
+- Live event stream
+- AI decisions
+- Auto Applied badges
+- Active firewall rules
+- Unblock button
 
-For a live demo experience:
+Auto-applied decisions do not show Approve/Reject buttons. Use the Unblock button under Active Firewall Rules to restore access.
 
-- Turn on `Auto-refresh dashboard`
-- Turn on `Live simulation mode`
-- Choose a refresh interval and events-per-refresh batch size
-- Watch new events and alerts appear automatically
+## Time-Based Test-Site Policy
 
-## Current Detection Strategy
-
-The baseline detector uses lightweight behavior profiling:
-
-- Typical login hour range per user
-- Known source IPs
-- Known destination IPs
-- Average bytes sent and received
-- Event count growth
-
-It then scores an event higher when it contains multiple deviations from the user's normal profile.
-
-## Good Next Steps
-
-- Add role-based anomaly thresholds and severity levels
-- Train an unsupervised model such as Isolation Forest
-- Use sliding time windows for richer behavior profiles
-- Add role-based baselines across teams
-- Compare behavior before and after suspicious events
-- Export alerts to CSV or a database
-
-## Course Report Sections
-
-- Problem statement
-- Literature review
-- Dataset and feature design
-- Detection methodology
-- Experimental results
-- Limitations and future work
-
-This starter is designed to help you begin immediately, then improve the system step by step as your course project grows.
-
-## Web Application Version
-
-This copy now includes a FastAPI + React web application with an AI firewall
-advisor.
-
-### Backend
-
-```powershell
-python -m pip install -r requirements.txt
-python -m pip install -e .
-uvicorn backend.app:app --host 0.0.0.0 --port 8001 --reload
-```
-
-The API runs at:
+Protected test-site access between:
 
 ```text
-http://SERVER_IP:8001
+8 AM to 5 PM
 ```
 
-Main endpoints:
+is treated as normal/monitoring behavior.
+
+Access outside:
 
 ```text
+8 AM to 5 PM
+```
+
+is treated as suspicious and can be auto-blocked.
+
+## Windows Firewall Notes
+
+Real Windows Firewall rules require Administrator permission.
+
+If OS-level firewall commands fail, the system falls back to application-level enforcement through the test-site server.
+
+Allow ports if needed from Administrator CMD:
+
+```cmd
+netsh advfirewall firewall add rule name="AI Backend 8001" dir=in action=allow protocol=TCP localport=8001
+netsh advfirewall firewall add rule name="AI Dashboard 5173" dir=in action=allow protocol=TCP localport=5173
+netsh advfirewall firewall add rule name="AI Test Site 8080" dir=in action=allow protocol=TCP localport=8080
+```
+
+## API Endpoints
+
+```text
+GET  /api/health
 GET  /api/summary
 GET  /api/events
 GET  /api/alerts
@@ -163,89 +298,57 @@ POST /api/collector/stop
 POST /api/events
 ```
 
-### Frontend
+## Testing Checklist
 
-Open a second terminal:
+1. Backend health works:
 
 ```powershell
-cd frontend
-npm install
-npm run dev
+curl http://127.0.0.1:8001/api/health
 ```
 
-The React dashboard runs at:
+2. Test site opens:
 
 ```text
-http://127.0.0.1:5173
+http://localhost:8080
 ```
 
-### Real Firewall + Test Site Demo
-
-Run the backend as Administrator/root because real firewall rules require
-elevated privileges.
-
-On the server PC, start the backend:
-
-```powershell
-uvicorn backend.app:app --host 0.0.0.0 --port 8001 --reload
-```
-
-Start the React dashboard:
-
-```powershell
-cd frontend
-npm run dev -- --host 0.0.0.0 --port 5173
-```
-
-Serve the local Test Site on the server PC:
-
-```powershell
-python scripts/serve_test_site.py --host 0.0.0.0 --port 8080
-```
-
-Client PCs should open:
+3. Dashboard opens:
 
 ```text
-http://SERVER_IP:8080
+http://localhost:5173
 ```
 
-Then run the client logger on each client PC:
+4. Client can reach server:
 
-```powershell
-python scripts/client_logger.py --server-api http://SERVER_IP:8001/api/events --test-site-host SERVER_IP --test-site-port 8080 --client-id client1
+```cmd
+ping SERVER_IP
+curl http://SERVER_IP:8001/api/health
+curl http://SERVER_IP:8080
 ```
 
-For a controlled demo that generates traffic automatically:
+5. Client logger uploads events.
 
-```powershell
-python scripts/client_logger.py --server-api http://SERVER_IP:8001/api/events --test-site-host SERVER_IP --test-site-port 8080 --client-id client1 --probe-test-site
-```
+6. Dashboard shows live events.
 
-When the AI Firewall Advisor recommendation is approved, the backend creates a
-real firewall rule on the server PC:
+7. AI decision appears.
 
-- Windows: `New-NetFirewallRule` blocks inbound traffic from the client IP.
-- Linux: `ufw insert 1 deny` blocks traffic from the client IP.
-- If a port is known, only that Test Site port is blocked.
-- Expired rules are checked every 60 seconds and automatically unblocked.
-
-### Autoencoder anomaly model
-
-Train the neural anomaly detector after you have a baseline CSV with mostly
-normal traffic:
-
-```powershell
-python -m insider_threat_detection.train_firewall_nn --csv-path data\network_events.csv
-```
-
-The training script fits preprocessing on normal/low-risk events, uses Keras
-embedding layers for `user_id`, `source_ip`, and `destination_ip`, trains an
-autoencoder to reconstruct normal behavior features, and saves the 95th
-percentile reconstruction-error threshold in:
+8. Strong block/quarantine decision creates:
 
 ```text
-models/firewall_preprocessor.pkl
+data/firewall_rules.csv
 ```
 
-At inference time, events whose reconstruction error exceeds that threshold are
-treated as anomalous. Larger errors escalate from `block` to `quarantine`.
+9. Blocked client receives:
+
+```text
+403 Access blocked
+```
+
+## Notes
+
+- Dashboard refreshes every 1 minute.
+- Client timestamps are generated on the client PC.
+- Live data is stored in `data/real_time_stored_data.csv`.
+- Firewall rules are stored in `data/firewall_rules.csv`.
+- Firewall rules expire automatically based on `duration_minutes`.
+```
