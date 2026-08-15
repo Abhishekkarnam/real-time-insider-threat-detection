@@ -114,8 +114,57 @@ def _recommendation_id(event_key: str) -> str:
     return hashlib.sha1(event_key.encode("utf-8")).hexdigest()[:12]
 
 
+def _rule_matches_recommendation(rule: dict[str, str], recommendation: dict[str, Any]) -> bool:
+    if rule.get("status") != "active":
+        return False
+    return (
+        str(rule.get("source_ip", "")) == str(recommendation.get("source_ip", ""))
+        and str(rule.get("destination_ip", "")) == str(recommendation.get("destination_ip", ""))
+        and str(rule.get("port", "")) == str(recommendation.get("port", ""))
+        and str(rule.get("action", "")) == str(recommendation.get("ai_action", ""))
+    )
+
+
+def _has_active_rule_for_recommendation(recommendation: dict[str, Any]) -> bool:
+    return any(_rule_matches_recommendation(rule, recommendation) for rule in list_rules(RULES_PATH))
+
+
+def _should_auto_apply(recommendation: dict[str, Any]) -> bool:
+    """Allow the AI to enforce only strong block/quarantine decisions."""
+    action = str(recommendation.get("ai_action", "")).lower()
+    if action not in {"block", "quarantine"}:
+        return False
+
+    try:
+        confidence = float(recommendation.get("confidence") or 0.0)
+        score = float(recommendation.get("score") or 0.0)
+    except (TypeError, ValueError):
+        confidence = 0.0
+        score = 0.0
+
+    severity = str(recommendation.get("severity", ""))
+    is_test_site_decision = "test site" in str(recommendation.get("explanation", "")).lower()
+
+    return (
+        action == "quarantine"
+        or confidence >= 0.90
+        or severity == "Critical"
+        or score >= 4.0
+        or (is_test_site_decision and confidence >= 0.90)
+    )
+
+
+def _auto_apply_recommendation(recommendation: dict[str, Any]) -> str:
+    if not _should_auto_apply(recommendation):
+        return "pending"
+    if _has_active_rule_for_recommendation(recommendation):
+        return "auto_applied"
+    apply_rule(RULES_PATH, {key: str(value) for key, value in recommendation.items()})
+    return "auto_applied"
+
+
 def sync_firewall_recommendations() -> list[dict[str, str]]:
-    """Build pending firewall recommendations from the live event CSV.
+    """Build live recommendations and auto-enforce strong AI firewall actions.
 
     Recommendations are intentionally not persisted to firewall_recommendations.csv.
     The dashboard should reflect live data from real_time_stored_data.csv only.
@@ -128,28 +177,28 @@ def sync_firewall_recommendations() -> list[dict[str, str]]:
             continue
         event_key = make_event_key(event)
         recommendation = recommend_firewall_action(event)
-        new_recommendations.append(
-            {
-                "id": _recommendation_id(event_key),
-                "event_key": event_key,
-                "timestamp": event["timestamp"],
-                "user_id": event["user_id"],
-                "source_ip": event["source_ip"],
-                "destination_ip": event["destination_ip"],
-                "protocol": event["protocol"],
-                "port": recommendation.port or "",
-                "severity": event["severity"],
-                "score": event["score"],
-                "reasons": event["reasons"],
-                "ai_action": recommendation.ai_action,
-                "target_type": recommendation.target_type,
-                "target_value": recommendation.target_value,
-                "duration_minutes": recommendation.duration_minutes,
-                "confidence": recommendation.confidence,
-                "explanation": recommendation.explanation,
-                "status": "pending",
-            }
-        )
+        row = {
+            "id": _recommendation_id(event_key),
+            "event_key": event_key,
+            "timestamp": event["timestamp"],
+            "user_id": event["user_id"],
+            "source_ip": event["source_ip"],
+            "destination_ip": event["destination_ip"],
+            "protocol": event["protocol"],
+            "port": recommendation.port or "",
+            "severity": event["severity"],
+            "score": event["score"],
+            "reasons": event["reasons"],
+            "ai_action": recommendation.ai_action,
+            "target_type": recommendation.target_type,
+            "target_value": recommendation.target_value,
+            "duration_minutes": recommendation.duration_minutes,
+            "confidence": recommendation.confidence,
+            "explanation": recommendation.explanation,
+            "status": "pending",
+        }
+        row["status"] = _auto_apply_recommendation(row)
+        new_recommendations.append(row)
     return [{key: str(value) for key, value in row.items()} for row in new_recommendations]
 
 

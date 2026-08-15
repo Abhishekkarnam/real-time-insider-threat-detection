@@ -126,6 +126,8 @@ function CollectorControls({ collector, onRefresh, onCollectorUpdate }) {
 
 function FirewallAdvisor({ recommendations, rules, onAction }) {
   const pending = recommendations.filter((item) => item.status === "pending").slice(0, 8);
+  const autoApplied = recommendations.filter((item) => item.status === "auto_applied").slice(0, 8);
+  const decisions = [...autoApplied, ...pending].slice(0, 8);
   const activeRules = rules.filter((rule) => rule.status === "active").slice(0, 6);
 
   return (
@@ -134,20 +136,21 @@ function FirewallAdvisor({ recommendations, rules, onAction }) {
         <ShieldAlert size={20} />
         <div>
           <h2>AI Firewall Advisor</h2>
-          <p>Autoencoder anomaly layer with real/app-enforced firewall actions.</p>
+          <p>Autonomous AI firewall enforcement with real/app-enforced blocking.</p>
         </div>
       </div>
 
       <div className="advisor-grid">
         <div>
-          <h3>Pending Decisions</h3>
+          <h3>AI Decisions</h3>
           <div className="decision-list">
-            {pending.length === 0 && <p className="empty">No pending recommendations.</p>}
-            {pending.map((item) => (
+            {decisions.length === 0 && <p className="empty">No live AI decisions.</p>}
+            {decisions.map((item) => (
               <article className="decision" key={item.id}>
                 <div>
                   <span className={severityClass(item.severity)}>{item.severity}</span>
                   <span className={actionClass(item.ai_action)}>{item.ai_action}</span>
+                  <span className={`status ${item.status}`}>{item.status === "auto_applied" ? "Auto Applied" : "Pending Review"}</span>
                 </div>
                 <strong>{item.source_ip} {"->"} {item.destination_ip}</strong>
                 <p>{item.explanation}</p>
@@ -156,14 +159,18 @@ function FirewallAdvisor({ recommendations, rules, onAction }) {
                   <span>{Math.round(Number(item.confidence) * 100)}% confidence</span>
                   <span>{item.duration_minutes} min</span>
                 </div>
-                <div className="decision-actions">
-                  <button className="approve" onClick={() => onAction("/api/firewall/approve", { recommendation_id: item.id })}>
-                    <CheckCircle2 size={15} /> Approve
-                  </button>
-                  <button className="reject" onClick={() => onAction("/api/firewall/reject", { recommendation_id: item.id })}>
-                    <XCircle size={15} /> Reject
-                  </button>
-                </div>
+                {item.status === "pending" ? (
+                  <div className="decision-actions">
+                    <button className="approve" onClick={() => onAction("/api/firewall/approve", { recommendation_id: item.id })}>
+                      <CheckCircle2 size={15} /> Approve
+                    </button>
+                    <button className="reject" onClick={() => onAction("/api/firewall/reject", { recommendation_id: item.id })}>
+                      <XCircle size={15} /> Reject
+                    </button>
+                  </div>
+                ) : (
+                  <p className="auto-note">AI automatically enforced this rule. Use Unblock from Active Firewall Rules if access should be restored.</p>
+                )}
               </article>
             ))}
           </div>
